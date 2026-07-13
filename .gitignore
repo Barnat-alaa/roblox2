@@ -1,0 +1,29 @@
+# Roblox build output
+/build/
+/*.rbxl
+/*.rbxlx
+/*.rbxm
+/*.rbxmx
+
+# Wally packages are restored from wally.lock
+/Packages/
+/DevPackages/
+/ServerPackages/
+
+# Rojo and Luau tooling output
+/sourcemap.json
+/*.log
+
+# Editor and operating-system files
+/.vscode/
+/.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets and local environment configuration
+.env
+.env.*
+!.env.example
+secrets.*
+*.pem
+*.key

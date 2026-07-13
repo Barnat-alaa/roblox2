@@ -1,0 +1,25 @@
+{
+  "name": "Project Critter Clash Tests",
+  "serveAddress": "127.0.0.1",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Packages": {
+        "$path": "DevPackages"
+      },
+      "Tests": {
+        "$path": "tests"
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "TestRunner": {
+        "$path": "scripts/TestRunner.server.luau"
+      }
+    }
+  }
+}

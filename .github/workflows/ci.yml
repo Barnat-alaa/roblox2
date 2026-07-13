@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+      - staging
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rokit
+        shell: bash
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /tmp/rokit.zip \
+            https://github.com/rojo-rbx/rokit/releases/download/v1.2.0/rokit-1.2.0-linux-x86_64.zip
+          echo "951a7f3ec3d2a5e021fd1867d32f69f010ee4c2927f644b759578afc59c65fc0  /tmp/rokit.zip" \
+            | sha256sum --check
+          unzip -q /tmp/rokit.zip -d /tmp/rokit
+          sudo install /tmp/rokit/rokit /usr/local/bin/rokit
+          rokit --version
+
+      - name: Install project toolchain
+        run: rokit install --no-trust-check
+
+      - name: Restore Wally packages
+        run: wally install
+
+      - name: Verify formatting
+        run: stylua --check src tests scripts
+
+      - name: Lint strict Luau
+        run: selene src tests scripts
+
+      - name: Download pinned Roblox type definitions
+        shell: bash
+        run: |
+          mkdir -p build
+          curl --fail --location --silent --show-error \
+            --output build/globalTypes.d.luau \
+            https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/1.68.1/scripts/globalTypes.d.luau
+          echo "a0027362f872d231c1c4bbea6b2d5d561b0a4ea7e82458ea8a5f862cef8938aa  build/globalTypes.d.luau" \
+            | sha256sum --check
+
+      - name: Type-check the production DataModel
+        shell: bash
+        run: |
+          rojo sourcemap --include-non-scripts default.project.json --output build/sourcemap.json
+          luau-lsp analyze \
+            --platform roblox \
+            --definitions "@roblox=build/globalTypes.d.luau" \
+            --sourcemap build/sourcemap.json \
+            src
+
+      - name: Validate production Rojo build
+        run: |
+          mkdir -p build
+          rojo build default.project.json --output build/CritterClash.rbxlx
+
+      - name: Validate test Rojo build
+        run: rojo build test.project.json --output build/CritterClashTests.rbxlx
+
+      - name: Validate configuration and licence registries
+        shell: bash
+        run: |
+          test -s default.project.json
+          test -s rokit.toml
+          test -s wally.lock
+          test -s docs/ASSET_LICENSES.md
+          test -s docs/THIRD_PARTY_NOTICES.md
+          grep -q "TestEZ" docs/THIRD_PARTY_NOTICES.md
+          grep -q "No production entries yet" docs/ASSET_LICENSES.md
+
+      - name: Scan repository for common secret formats
+        shell: bash
+        run: |
+          if git grep -n -E '(-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{20,})' -- . ':!docs/SECURITY.md'; then
+            echo "Potential secret detected"
+            exit 1
+          fi
+
+      - name: Upload validated place builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: critter-clash-place-builds
+          path: build/*.rbxlx
+          if-no-files-found: error
+          retention-days: 7

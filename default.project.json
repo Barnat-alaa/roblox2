@@ -1,0 +1,52 @@
+{
+  "name": "Project Critter Clash",
+  "serveAddress": "127.0.0.1",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/shared"
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "CritterClashServer": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$properties": {
+        "AutoJumpEnabled": false,
+        "CharacterJumpHeight": 7.2,
+        "CharacterWalkSpeed": 16
+      },
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "CritterClashClient": {
+          "$path": "src/client"
+        }
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "FallenPartsDestroyHeight": -80,
+        "Gravity": 120
+      }
+    },
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Ambient": [55, 74, 91],
+        "Brightness": 2,
+        "ClockTime": 14,
+        "EnvironmentDiffuseScale": 0.35,
+        "EnvironmentSpecularScale": 0.2,
+        "GlobalShadows": true,
+        "OutdoorAmbient": [90, 105, 120]
+      }
+    }
+  }
+}

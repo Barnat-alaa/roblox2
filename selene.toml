@@ -1,0 +1,5 @@
+std = "roblox"
+roblox-std-source = "pinned"
+
+[config]
+empty_if = { comments_count = true }
