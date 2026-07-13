@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install pinned Rokit
         shell: bash
@@ -95,7 +95,7 @@ jobs:
           fi
 
       - name: Upload validated place builds
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: critter-clash-place-builds
           path: build/*.rbxlx

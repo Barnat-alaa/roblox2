@@ -44,8 +44,8 @@ Rokit downloads and installs the manifest-pinned tools for development/CI. The C
 
 The GitHub Actions workflow references:
 
-- actions/checkout@v4;
-- actions/upload-artifact@v4;
+- actions/checkout@v7;
+- actions/upload-artifact@v7;
 - GitHub-hosted runners and artifact storage.
 
 These support CI and are not part of the Roblox place. Their upstream terms/licenses and GitHub service terms apply. For stronger supply-chain control before production, review and pin actions to approved immutable commit SHAs, then update this notice.
