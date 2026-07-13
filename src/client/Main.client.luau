@@ -10,6 +10,7 @@ local CameraController = require(script.Parent.Controllers.CameraController)
 local EffectsController = require(script.Parent.Controllers.EffectsController)
 local HUDController = require(script.Parent.Controllers.HUDController)
 local InputController = require(script.Parent.Controllers.InputController)
+local TerrainController = require(script.Parent.Controllers.TerrainController)
 local TrajectoryController = require(script.Parent.Controllers.TrajectoryController)
 
 type NetworkTable = { [string]: any }
@@ -204,12 +205,16 @@ local requestFireRemote = waitForRemote(remotesFolder, RemoteNames.requestFire)
 local selectWeaponRemote = waitForRemote(remotesFolder, RemoteNames.selectWeapon)
 local combatEventRemote = waitForRemote(remotesFolder, RemoteNames.combatEvent)
 local matchStateRemote = waitForRemote(remotesFolder, RemoteNames.matchState)
+local terrainEventRemote = waitForRemote(remotesFolder, RemoteNames.terrainEvent)
+local requestTerrainSnapshotRemote =
+	waitForRemote(remotesFolder, RemoteNames.requestTerrainSnapshot)
 
 local inputController = InputController.create()
 local initialIntent: Intent = inputController.getIntent()
 local cameraController = CameraController.create()
 local effectsController = EffectsController.create()
 local hudController = HUDController.create(initialIntent)
+local terrainController = TerrainController.create(terrainEventRemote, requestTerrainSnapshotRemote)
 local trajectoryController = TrajectoryController.create(initialIntent)
 local connections: { RBXScriptConnection } = {}
 local destroyed = false
@@ -312,6 +317,7 @@ local function destroy()
 	for _, connection in connections do
 		connection:Disconnect()
 	end
+	terrainController.destroy()
 	trajectoryController.destroy()
 	effectsController.destroy()
 	cameraController.destroy()

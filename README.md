@@ -10,14 +10,25 @@ relationship with another game are prohibited.
 
 ## Current development slice
 
-The repository contains the first server-authoritative combat foundation:
+The repository contains the first server-authoritative combat and terrain foundation:
 
 - deterministic shared ballistics, wind, weapon, and damage rules;
 - a server-owned turn/fire boundary with request validation;
-- a generated 2.5D greybox arena and combat-plane enforcement;
+- an authoritative 45 × 24 terrain grid using configurable 4-stud cells;
+- 8 × 8 dirty chunks for server collision and pooled client rendering;
+- revisioned Snapshot/Delta terrain replication with validated, rate-limited resync;
+- projectile crater integration, including Acorn impacts and a bounded Mole Drill path that
+  clips at the grid boundary and protected terrain;
+- protected spawn supports and bottom cells, a small server-lethal central hazard, and
+  server-enforced death-height elimination;
 - a side-view client camera, aim controls, trajectory preview, and combat HUD;
-- TestEZ specifications, lint/format configuration, and reproducible Rojo builds;
+- 37 TestEZ specifications, lint/format configuration, and reproducible Rojo builds;
 - a CI workflow with pinned tooling, build validation, and a basic secret scan.
+
+Static analysis and both Rojo builds are clean. Studio TestEZ reports **37 passed, 0 failed,
+0 skipped**, and the final terrain-enabled playable build booted clean. Live Acorn and Mole
+Drill smoke shots produced matching revisioned terrain deltas while protected terrain
+remained intact. A separate two-client validation has not yet been recorded.
 
 See [CURRENT_STATUS.md](CURRENT_STATUS.md), [ROADMAP.md](ROADMAP.md), and
 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) before continuing development.
@@ -75,7 +86,8 @@ Mobile-safe controls are rendered by the client, but real-device tuning is still
 ## Repository policy
 
 - All important Luau modules use `--!strict`.
-- The server owns turns, shot origins, projectile collision, damage, and rewards.
+- The server owns turns, shot origins, projectile collision, damage, and terrain mutations.
+- Future rewards must also be server-authoritative.
 - Clients never report hits or damage.
 - No secrets, private keys, ripped assets, or unreviewed third-party assets may be committed.
 - Production publication and production data changes require explicit approval.

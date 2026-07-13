@@ -10,6 +10,8 @@ export type Remotes = {
 	selectWeapon: RemoteEvent,
 	combatEvent: RemoteEvent,
 	matchState: RemoteEvent,
+	terrainEvent: RemoteEvent,
+	requestTerrainSnapshot: RemoteEvent,
 }
 
 local NetworkService = {}
@@ -46,6 +48,8 @@ function NetworkService.create(): Remotes
 		selectWeapon = getOrCreateRemote(folder, RemoteNames.selectWeapon),
 		combatEvent = getOrCreateRemote(folder, RemoteNames.combatEvent),
 		matchState = getOrCreateRemote(folder, RemoteNames.matchState),
+		terrainEvent = getOrCreateRemote(folder, RemoteNames.terrainEvent),
+		requestTerrainSnapshot = getOrCreateRemote(folder, RemoteNames.requestTerrainSnapshot),
 	}) :: Remotes
 end
 

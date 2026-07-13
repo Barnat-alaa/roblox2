@@ -40,7 +40,9 @@ local function createSpawn(parent: Instance, name: string, x: number): SpawnLoca
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = name
 	spawn.Anchored = true
-	spawn.CanCollide = true
+	spawn.CanCollide = false
+	spawn.CanQuery = false
+	spawn.CanTouch = false
 	spawn.Neutral = true
 	spawn.Duration = 0
 	spawn.Transparency = 1
@@ -58,7 +60,7 @@ local function createTrainingTarget(parent: Instance): Model
 		model,
 		"HumanoidRootPart",
 		Vector3.new(4, 5, 3),
-		Vector3.new(48, 3.5, GameConfig.combatPlaneZ),
+		Vector3.new(48, 10.5, GameConfig.combatPlaneZ),
 		Color3.fromRGB(238, 112, 93),
 		Enum.Material.SmoothPlastic,
 		true
@@ -96,33 +98,9 @@ function ArenaService.createGreybox(): Model
 	local arena = Instance.new("Model")
 	arena.Name = ARENA_NAME
 
-	makePart(
-		arena,
-		"Ground",
-		Vector3.new(GameConfig.arenaHalfWidth * 2, 6, 12),
-		Vector3.new(0, -3, GameConfig.combatPlaneZ),
-		Color3.fromRGB(70, 115, 97),
-		Enum.Material.Grass,
-		true
-	)
-	makePart(
-		arena,
-		"LeftShelf",
-		Vector3.new(32, 5, 12),
-		Vector3.new(-54, 8, GameConfig.combatPlaneZ),
-		Color3.fromRGB(91, 123, 105),
-		Enum.Material.Ground,
-		true
-	)
-	makePart(
-		arena,
-		"RightShelf",
-		Vector3.new(28, 8, 12),
-		Vector3.new(57, 6, GameConfig.combatPlaneZ),
-		Color3.fromRGB(91, 123, 105),
-		Enum.Material.Ground,
-		true
-	)
+	-- TerrainService owns the visible terrain projection and authoritative
+	-- collision grid. ArenaService keeps only non-destructible scene dressing,
+	-- spawns, and the development target.
 	makePart(
 		arena,
 		"Backdrop",

@@ -13,6 +13,7 @@ local Wind = require(ReplicatedStorage.Shared.Simulation.Wind)
 local DamageService = require(script.Parent.DamageService)
 local MatchService = require(script.Parent.MatchService)
 local NetworkService = require(script.Parent.NetworkService)
+local TerrainService = require(script.Parent.TerrainService)
 
 type Remotes = NetworkService.Remotes
 type ProjectileDefinition = Weapons.ProjectileDefinition
@@ -88,7 +89,12 @@ local function simulateShot(
 	raycastParams.IgnoreWater = true
 	raycastParams.FilterDescendantsInstances = if player.Character then { player.Character } else {}
 
-	local function finish(position: Vector3, normal: Vector3)
+	local function finish(
+		position: Vector3,
+		normal: Vector3,
+		terrainPathStart: Vector3?,
+		suppressTerrain: boolean?
+	)
 		if finished then
 			return
 		end
@@ -103,11 +109,33 @@ local function simulateShot(
 		if not damageSucceeded then
 			warn(string.format("[CritterClash] Explosion damage failed: %s", tostring(damageError)))
 		end
+
+		local terrainCellsChanged = 0
+		local terrainSucceeded, terrainResult = pcall(function(): number
+			if suppressTerrain then
+				return 0
+			end
+			if terrainPathStart then
+				return TerrainService.applyDrillPath(
+					terrainPathStart,
+					position,
+					definition.terrainRadius
+				)
+			end
+			return TerrainService.applyImpact(position, definition.terrainRadius)
+		end)
+		if terrainSucceeded then
+			terrainCellsChanged = terrainResult :: number
+		else
+			warn(string.format("[CritterClash] Terrain impact failed: %s", tostring(terrainResult)))
+		end
 		remotes.combatEvent:FireAllClients("ProjectileImpacted", {
 			shotId = shotId,
 			position = position,
 			normal = normal,
 			weaponId = definition.id,
+			terrainCellsChanged = terrainCellsChanged,
+			terrainRevision = TerrainService.getRevision(),
 		})
 		MatchService.finishProjectile()
 	end
@@ -153,14 +181,21 @@ local function simulateShot(
 					if definition.detonationMode == "BounceLimit" and bouncesRemaining == 0 then
 						finish(hit.Position, hit.Normal)
 					end
-				elseif definition.detonationMode == "Drill" then
-					local direction = if displacement.Magnitude > 0
-						then displacement.Unit
-						else Vector3.xAxis
-					finish(
-						hit.Position + direction * math.min(definition.penetrationDepth, 8),
-						hit.Normal
-					)
+				elseif
+					definition.detonationMode == "Drill"
+					and TerrainService.isTerrainInstance(hit.Instance)
+				then
+					if TerrainService.isIndestructibleInstance(hit.Instance) then
+						finish(hit.Position, hit.Normal, nil, true)
+					else
+						local direction = if displacement.Magnitude > 0
+							then displacement.Unit
+							else Vector3.xAxis
+						local requestedEnd = hit.Position + direction * definition.penetrationDepth
+						local clippedEnd =
+							TerrainService.clipDrillEndpoint(hit.Position, requestedEnd)
+						finish(clippedEnd, hit.Normal, hit.Position)
+					end
 				else
 					finish(hit.Position, hit.Normal)
 				end

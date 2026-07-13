@@ -54,6 +54,14 @@ local function constrainCharacter(player: Player)
 	end
 
 	local position = root.Position
+	if position.Y < GameConfig.deathHeight then
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			humanoid.Health = 0
+		end
+		return
+	end
+
 	local x = position.X
 	local startX = turnStartX[player]
 	if player == activePlayer and startX then
