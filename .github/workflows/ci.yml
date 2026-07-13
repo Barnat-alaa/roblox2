@@ -33,7 +33,10 @@ jobs:
           rokit --version
 
       - name: Install project toolchain
-        run: rokit install --no-trust-check
+        shell: bash
+        run: |
+          rokit install --no-trust-check
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
 
       - name: Restore Wally packages
         run: wally install
