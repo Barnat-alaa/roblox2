@@ -11,9 +11,9 @@ local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
 local Wind = require(ReplicatedStorage.Shared.Simulation.Wind)
 
 local DOT_COUNT = 24
-local SIMULATION_STEP = 1 / 15
-local STEPS_PER_DOT = 4
-local SIMULATION_STEPS = DOT_COUNT * STEPS_PER_DOT
+local SAMPLE_INTERVAL = 4 / 15
+local COLLISION_SUBSTEPS_PER_DOT = 2
+local COLLISION_INTERVAL = SAMPLE_INTERVAL / COLLISION_SUBSTEPS_PER_DOT
 local ORIGIN_HEIGHT = 2.4
 local REFRESH_INTERVAL = 0.1
 local MINT = Color3.fromRGB(118, 217, 177)
@@ -83,7 +83,7 @@ function TrajectoryController.create(initialIntent: Intent): Controller
 	local visible = false
 	local dirty = true
 	local destroyed = false
-	local elapsedSinceRefresh = REFRESH_INTERVAL
+	local elapsedSinceMovementCheck = REFRESH_INTERVAL
 	local lastOrigin: Vector3? = nil
 
 	local function hideAll()
@@ -115,13 +115,6 @@ function TrajectoryController.create(initialIntent: Intent): Controller
 			gravityScale = definition.gravityScale,
 			windScale = definition.windScale,
 		})
-		local points = Ballistics.simulatePreview(
-			Ballistics.createState(origin, velocity),
-			acceleration,
-			SIMULATION_STEP,
-			SIMULATION_STEPS
-		)
-
 		local raycastParams = RaycastParams.new()
 		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 		local filter: { Instance } = { folder }
@@ -132,72 +125,55 @@ function TrajectoryController.create(initialIntent: Intent): Controller
 		raycastParams.FilterDescendantsInstances = filter
 		raycastParams.IgnoreWater = true
 
-		local dotIndex = 0
+		local visibleDotCount = 0
+		local previousPoint = origin
 		local stopped = false
-		local previousPoint = points[1]
-		for pointIndex = 2, #points do
-			local point = points[pointIndex]
-			local hit = Workspace:Raycast(previousPoint, point - previousPoint, raycastParams)
-			if hit then
-				stopped = true
-				if (pointIndex - 1) % STEPS_PER_DOT ~= 0 then
-					dotIndex += 1
-					local dot = dots[dotIndex]
-					if dot then
-						dot.Position = hit.Position
-						dot.Transparency = 0.15
-					end
+		for dotIndex = 1, DOT_COUNT do
+			local dot = dots[dotIndex]
+			for substepIndex = 1, COLLISION_SUBSTEPS_PER_DOT do
+				local elapsed = (dotIndex - 1) * SAMPLE_INTERVAL + substepIndex * COLLISION_INTERVAL
+				local point = Ballistics.positionAt(origin, velocity, acceleration, elapsed)
+				local hit = Workspace:Raycast(previousPoint, point - previousPoint, raycastParams)
+				if hit then
+					dot.Position = hit.Position
+					dot.Transparency = 0.15
+					visibleDotCount = dotIndex
+					stopped = true
+					break
 				end
+				previousPoint = point
+			end
+			if stopped then
 				break
 			end
 
-			if (pointIndex - 1) % STEPS_PER_DOT == 0 then
-				dotIndex += 1
-				local dot = dots[dotIndex]
-				if dot then
-					dot.Position = point
-					dot.Transparency = math.min(0.58, 0.08 + dotIndex * 0.018)
-				end
-			end
-			previousPoint = point
+			dot.Position = previousPoint
+			dot.Transparency = math.min(0.58, 0.08 + dotIndex * 0.018)
+			visibleDotCount = dotIndex
 		end
 
-		if not stopped and dotIndex > DOT_COUNT then
-			dotIndex = DOT_COUNT
-		end
-		for index = dotIndex + 1, DOT_COUNT do
+		for index = visibleDotCount + 1, DOT_COUNT do
 			dots[index].Transparency = 1
 		end
 	end
 
 	local heartbeatConnection = RunService.Heartbeat:Connect(function(deltaTime: number)
-		if destroyed then
+		if destroyed or not visible then
 			return
 		end
-		elapsedSinceRefresh += deltaTime
-		if elapsedSinceRefresh < REFRESH_INTERVAL and not dirty then
-			return
-		end
-
-		local origin = getLaunchOrigin()
-		if
-			origin
-			and (
-				not lastOrigin
-				or (
-					(origin - lastOrigin).Magnitude > 0.05
-					and elapsedSinceRefresh >= REFRESH_INTERVAL
-				)
-			)
-		then
-			dirty = true
-		elseif not origin and lastOrigin then
-			lastOrigin = nil
-			dirty = true
+		elapsedSinceMovementCheck += deltaTime
+		if elapsedSinceMovementCheck >= REFRESH_INTERVAL then
+			elapsedSinceMovementCheck = 0
+			local origin = getLaunchOrigin()
+			if origin and (not lastOrigin or (origin - lastOrigin).Magnitude > 0.05) then
+				dirty = true
+			elseif not origin and lastOrigin then
+				lastOrigin = nil
+				dirty = true
+			end
 		end
 
 		if dirty then
-			elapsedSinceRefresh = 0
 			rebuild()
 		end
 	end)

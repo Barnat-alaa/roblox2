@@ -8,6 +8,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Ballistics = require(ReplicatedStorage.Shared.Simulation.Ballistics)
+local BotConfig = require(ReplicatedStorage.Shared.Config.BotConfig)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
 
@@ -16,11 +17,12 @@ local GOLDEN = Color3.fromRGB(246, 196, 71)
 local MINT = Color3.fromRGB(118, 217, 177)
 local IMPACT_WHITE = Color3.fromRGB(255, 253, 246)
 local MAX_ACTIVE_SHOTS = 24
-local MAX_CATCHUP_STEPS = 480
+local MAX_CATCHUP_STEPS_PER_FRAME = 16
 local FALLBACK_LIFETIME = 8
 
 export type ShotLaunch = {
 	shotId: string,
+	shooterUserId: number,
 	weaponId: string,
 	origin: Vector3,
 	velocity: Vector3,
@@ -75,6 +77,7 @@ function EffectsController.create(): Controller
 	folder.Parent = Workspace
 
 	local activeShots: { [string]: ActiveShot } = {}
+	local activeShotCount = 0
 	local recentImpacts: { [string]: number } = {}
 	local nextSequence = 0
 	local destroyed = false
@@ -85,21 +88,24 @@ function EffectsController.create(): Controller
 			return
 		end
 		activeShots[shotId] = nil
+		activeShotCount -= 1
 		shot.part:Destroy()
 	end
 
 	local function trimOldShots()
-		local count = 0
+		if activeShotCount < MAX_ACTIVE_SHOTS then
+			return
+		end
+
 		local oldestId: string? = nil
 		local oldestSequence = math.huge
 		for shotId, shot in activeShots do
-			count += 1
 			if shot.sequence < oldestSequence then
 				oldestSequence = shot.sequence
 				oldestId = shotId
 			end
 		end
-		if count >= MAX_ACTIVE_SHOTS and oldestId then
+		if oldestId then
 			removeShot(oldestId)
 		end
 	end
@@ -109,7 +115,7 @@ function EffectsController.create(): Controller
 		while
 			not shot.settled
 			and shot.state.elapsed + GameConfig.projectileStepSeconds <= targetElapsed
-			and stepCount < MAX_CATCHUP_STEPS
+			and stepCount < MAX_CATCHUP_STEPS_PER_FRAME
 		do
 			stepCount += 1
 			local nextState =
@@ -184,22 +190,28 @@ function EffectsController.create(): Controller
 	end
 
 	local renderConnection = RunService.RenderStepped:Connect(function()
-		if destroyed then
+		if destroyed or activeShotCount == 0 then
 			return
 		end
 
 		local now = Workspace:GetServerTimeNow()
-		local expired: { string } = {}
+		local expired: { string }? = nil
 		for shotId, shot in activeShots do
 			local elapsed = math.max(0, now - shot.serverTime)
 			if elapsed > shot.maxLifetime + 0.5 then
-				table.insert(expired, shotId)
+				if expired then
+					table.insert(expired, shotId)
+				else
+					expired = { shotId }
+				end
 			else
 				advanceShot(shot, elapsed)
 			end
 		end
-		for _, shotId in expired do
-			removeShot(shotId)
+		if expired then
+			for _, shotId in expired do
+				removeShot(shotId)
+			end
 		end
 	end)
 
@@ -213,11 +225,14 @@ function EffectsController.create(): Controller
 		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 		raycastParams.IgnoreWater = true
 		local filter: { Instance } = { folder }
-		local shooterUserIdText = string.match(launchData.shotId, "^(%-?%d+):")
-		local shooterUserId = if shooterUserIdText then tonumber(shooterUserIdText) else nil
-		local shooter = if shooterUserId then Players:GetPlayerByUserId(shooterUserId) else nil
+		local shooter = Players:GetPlayerByUserId(launchData.shooterUserId)
 		if shooter and shooter.Character then
 			table.insert(filter, shooter.Character)
+		elseif launchData.shooterUserId == BotConfig.userId then
+			local bot = Workspace:FindFirstChild(BotConfig.modelName, true)
+			if bot and bot:IsA("Model") then
+				table.insert(filter, bot)
+			end
 		end
 		raycastParams.FilterDescendantsInstances = filter
 
@@ -267,6 +282,7 @@ function EffectsController.create(): Controller
 			settled = false,
 			sequence = nextSequence,
 		}
+		activeShotCount += 1
 
 		return projectile
 	end

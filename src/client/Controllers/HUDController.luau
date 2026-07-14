@@ -6,6 +6,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
+local BotConfig = require(ReplicatedStorage.Shared.Config.BotConfig)
 local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
 
 local DEEP_TEAL = Color3.fromRGB(15, 107, 109)
@@ -15,6 +16,7 @@ local GOLDEN = Color3.fromRGB(246, 196, 71)
 local DARK_NAVY = Color3.fromRGB(20, 40, 61)
 local MINT = Color3.fromRGB(118, 217, 177)
 local IMPACT_WHITE = Color3.fromRGB(255, 253, 246)
+local MATCH_DISPLAY_INTERVAL = 0.1
 
 export type Intent = {
 	angle: number,
@@ -352,6 +354,7 @@ function HUDController.create(initialIntent: Intent): Controller
 	local serverClockOffset = 0
 	local destroyed = false
 	local healthRefreshElapsed = 1
+	local matchDisplayRefreshElapsed = MATCH_DISPLAY_INTERVAL
 
 	local function updateIntent()
 		local definition = Weapons.get(intent.weaponId)
@@ -395,14 +398,31 @@ function HUDController.create(initialIntent: Intent): Controller
 			findHumanoid(localPlayer)
 		)
 
-		local opponent: Player? = nil
-		for _, player in Players:GetPlayers() do
-			if player ~= localPlayer then
-				opponent = player
-				break
-			end
+		local arena = Workspace:FindFirstChild("CritterClashArena")
+		local target = if arena then arena:FindFirstChild(BotConfig.modelName) else nil
+		if target and target:IsA("Model") then
+			updateHealthDisplay(
+				opponentNameLabel,
+				opponentHealthLabel,
+				opponentHealthFill,
+				BotConfig.displayName,
+				target:FindFirstChildOfClass("Humanoid")
+			)
+			return
 		end
-		if opponent then
+
+		for _, opponent in Players:GetPlayers() do
+			if opponent == localPlayer then
+				continue
+			end
+			local lifecycle = opponent:GetAttribute("MatchCharacterState")
+			if
+				lifecycle ~= "Participant"
+				and lifecycle ~= "Loading"
+				and lifecycle ~= "Eliminated"
+			then
+				continue
+			end
 			updateHealthDisplay(
 				opponentNameLabel,
 				opponentHealthLabel,
@@ -412,17 +432,12 @@ function HUDController.create(initialIntent: Intent): Controller
 			)
 			return
 		end
-
-		local target = Workspace:FindFirstChild("TrainingTarget", true)
-		local targetHumanoid = if target and target:IsA("Model")
-			then target:FindFirstChildOfClass("Humanoid")
-			else nil
 		updateHealthDisplay(
 			opponentNameLabel,
 			opponentHealthLabel,
 			opponentHealthFill,
-			"Training Target",
-			targetHumanoid
+			"WAITING FOR OPPONENT",
+			nil
 		)
 	end
 
@@ -438,6 +453,9 @@ function HUDController.create(initialIntent: Intent): Controller
 		if currentState.activeUserId == localPlayer.UserId then
 			turnLabel.Text = "YOUR TURN"
 			turnLabel.TextColor3 = MINT
+		elseif currentState.activeUserId == BotConfig.userId then
+			turnLabel.Text = string.format("%s'S TURN", string.upper(BotConfig.displayName))
+			turnLabel.TextColor3 = CREAM
 		elseif activePlayer then
 			turnLabel.Text = string.format("%s'S TURN", string.upper(activePlayer.DisplayName))
 			turnLabel.TextColor3 = CREAM
@@ -477,6 +495,11 @@ function HUDController.create(initialIntent: Intent): Controller
 		end
 	end
 
+	local function refreshMatchDisplay()
+		matchDisplayRefreshElapsed = 0
+		updateMatchDisplay()
+	end
+
 	updateIntent()
 	updateHealth()
 
@@ -489,27 +512,33 @@ function HUDController.create(initialIntent: Intent): Controller
 			healthRefreshElapsed = 0
 			updateHealth()
 		end
-		updateMatchDisplay()
+		matchDisplayRefreshElapsed += deltaTime
+		if matchDisplayRefreshElapsed >= MATCH_DISPLAY_INTERVAL then
+			refreshMatchDisplay()
+		end
 	end)
 
 	local controller: Controller = {
 		setMatchState = function(nextState: MatchState)
 			state = nextState
 			serverClockOffset = nextState.serverTime - Workspace:GetServerTimeNow()
-			updateMatchDisplay()
+			refreshMatchDisplay()
 		end,
 		setIntent = function(nextIntent: Intent)
 			intent = nextIntent
 			updateIntent()
 		end,
 		setCanAct = function(nextCanAct: boolean)
+			if canAct == nextCanAct then
+				return
+			end
 			canAct = nextCanAct
-			updateMatchDisplay()
+			refreshMatchDisplay()
 		end,
 		showMessage = function(nextMessage: string, duration: number?)
 			message = nextMessage
 			messageExpiresAt = Workspace:GetServerTimeNow() + (duration or 2.5)
-			updateMatchDisplay()
+			refreshMatchDisplay()
 		end,
 		destroy = function()
 			if destroyed then

@@ -3,6 +3,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ArenaService = require(script.Parent.Services.ArenaService)
+local BotService = require(script.Parent.Services.BotService)
 local CharacterService = require(script.Parent.Services.CharacterService)
 local MatchService = require(script.Parent.Services.MatchService)
 local NetworkService = require(script.Parent.Services.NetworkService)
@@ -20,8 +21,9 @@ TerrainService.start(remotes, arena)
 CharacterService.start()
 MatchService.start(remotes, arena)
 ProjectileService.start(remotes)
+BotService.start()
 
 workspace:SetAttribute("CritterClashBooted", true)
-workspace:SetAttribute("CritterClashBuild", "0.2.0-dev")
+workspace:SetAttribute("CritterClashBuild", "0.3.0-dev")
 
 print("[CritterClash] Development combat slice started")

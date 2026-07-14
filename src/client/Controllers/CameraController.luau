@@ -1,10 +1,12 @@
 --!strict
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-local GameConfig = require(game:GetService("ReplicatedStorage").Shared.Config.GameConfig)
+local BotConfig = require(ReplicatedStorage.Shared.Config.BotConfig)
+local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 
 local OVERVIEW_TARGET = Vector3.new(0, 15, GameConfig.combatPlaneZ)
 local OVERVIEW_DISTANCE = 155
@@ -27,11 +29,39 @@ export type Controller = {
 }
 
 local CameraController = {}
+local cachedBotModel: Model? = nil
+
+local function getBotModel(): Model?
+	local cached = cachedBotModel
+	if cached and cached.Parent ~= nil then
+		return cached
+	end
+	cachedBotModel = nil
+
+	local arena = Workspace:FindFirstChild("CritterClashArena")
+	local candidate = if arena then arena:FindFirstChild(BotConfig.modelName) else nil
+	if candidate and candidate:IsA("Model") then
+		cachedBotModel = candidate
+		return candidate
+	end
+	return nil
+end
 
 local function getActorPosition(userId: number): Vector3?
 	local player = Players:GetPlayerByUserId(userId)
 	if not player then
-		return nil
+		if userId ~= BotConfig.userId then
+			return nil
+		end
+		local bot = getBotModel()
+		if not bot then
+			return nil
+		end
+		local root = bot:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			return root.Position
+		end
+		return bot:GetPivot().Position
 	end
 
 	local character = player.Character

@@ -20,13 +20,17 @@ All notable project changes are recorded here.
 - Acorn/projectile craters and a bounded Mole Drill excavation path that clips at grid
   boundaries and protected terrain.
 - Small server-lethal central hazard and server-enforced death-height elimination.
-- Frozen 1v1 participant rosters, with a passive solo TrainingTarget and late joiners held as
-  spectators for the active match, then considered for open slots at the next boundary.
+- Frozen 1v1 participant rosters, with a server-owned BotCritter filling the solo opponent
+  slot and late joiners held as spectators for the active match, then considered for open
+  slots at the next boundary.
+- BotConfig, bounded and imperfect BotAim solving, BotService turn execution, and BotAim
+  TestEZ coverage. The bot uses the ordinary authoritative projectile and match services
+  without a fake Player or bot-only client remote.
 - Authoritative participant lifecycle and persistent elimination state across Roblox
   character respawns.
 - Exactly-once authoritative match Results, a responsive Victory/Defeat interface, unanimous
   connected-human rematch readiness, and fresh match IDs.
-- Clean rematch reset of terrain, TrainingTarget, characters, wind, turn state, and timers.
+- Clean rematch reset of terrain, BotCritter, characters, wind, turn state, and timers.
 - Pure match-rule coverage for winner/draw resolution, retained elimination, readiness, and
   match ID validation.
 - Terrain TestEZ coverage for compact deltas, ordering, atomic updates, overlap, protected
@@ -38,6 +42,19 @@ All notable project changes are recorded here.
 
 - Replaced legacy static ground/shelf collision with the logical terrain projection.
 - Impact events now report terrain cells changed and the resulting terrain revision.
+- Bot identity, health, turns, camera focus, shooter filtering, and Results now flow through
+  the existing client presentation instead of legacy solo-target handling.
+- Trajectory preview rebuilds no longer allocate a 97-point simulation path and are bounded
+  to 24 dots with two collision substeps each, for at most 48 raycasts per rebuild.
+- Projectile effects catch up at most 16 fixed steps per frame and early-out while idle; the
+  combat HUD updates timed display state at 10 Hz; terrain rendering rebuilds one dirty chunk
+  per Heartbeat.
+- Added the first original visual-direction pass: a low-part red-squirrel BotCritter with a
+  scarf and launcher, layered background hills/clouds/sun, and restrained atmosphere,
+  colour-grade, and bloom. Decorative geometry is non-queryable and non-physical.
+- Hardened match admission so a missing or dead human character is reloaded instead of being
+  promoted into a new match as an ineligible participant.
+- Advanced the local Development build marker to `0.3.0-dev`.
 
 ### Security
 
@@ -47,6 +64,8 @@ All notable project changes are recorded here.
   chunks.
 - Result and rematch requests validate bounded payloads, reject stale match IDs, and keep
   authoritative readiness idempotent.
+- Bot turns are initiated entirely by the server and pass through the same weapon, turn-token,
+  projectile, damage, terrain, elimination, and Result validation as human intent.
 - Malformed, stale, or revision-gapped client terrain state triggers rate-limited snapshot
   recovery instead of partial mutation.
 - Production publishing remains a manual, owner-approved operation.
@@ -54,7 +73,8 @@ All notable project changes are recorded here.
 ### Validation
 
 - StyLua, Selene, Roblox-aware Luau analysis, and both Rojo builds passed.
-- Studio TestEZ: 47 passed, 0 failed, 0 skipped.
+- Latest recorded Studio TestEZ run: 56 passed, 0 failed, 0 skipped. Current source contains
+  57 specs; the added tuning spec awaits a user-run Studio rerun.
 - The final terrain-enabled playable build booted clean with matching initial server/client
   terrain revision 0 and an active central hazard collision run.
 - A real Acorn request produced Delta 0 → 1 with 9 changed cells and matching server/client
@@ -66,5 +86,11 @@ All notable project changes are recorded here.
   unanimous-rematch loop. The defeated participant remained eliminated across respawn, and
   the fresh match restored both players, terrain, and turn state.
 - A solo last-player disconnect returned the server to clean `WaitingForPlayers` state.
+- A live pre-final-tuning bot run verified authoritative bot firing, human elimination, and
+  the DEFEAT Results interface. Final-tuning rematch and runtime/visual-feel acceptance remain
+  user-run validation.
+- Studio observations measured BotAim solving at 3.43-5.65 ms and a server snapshot at
+  16.65 ms p50, 17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. These are not
+  production or representative-device guarantees.
 - All temporary smoke scripts were removed; a clean restart produced only the expected
   development startup message.

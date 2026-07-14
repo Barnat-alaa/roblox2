@@ -8,7 +8,7 @@ local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local TerrainGrid = require(ReplicatedStorage.Shared.Simulation.TerrainGrid)
 
 local CHUNK_SIZE = 8
-local CHUNKS_PER_HEARTBEAT = 4
+local CHUNKS_PER_HEARTBEAT = 1
 local MAX_POOL_SIZE = 1_024
 local SNAPSHOT_RETRY_SECONDS = 2.5
 local WARNING_INTERVAL_SECONDS = 2

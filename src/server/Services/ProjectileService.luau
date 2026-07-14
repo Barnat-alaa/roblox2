@@ -18,11 +18,22 @@ local TerrainService = require(script.Parent.TerrainService)
 type Remotes = NetworkService.Remotes
 type ProjectileDefinition = Weapons.ProjectileDefinition
 type BallisticState = Ballistics.State
+type DamageSource = DamageService.DamageSource
+
+export type ShotIntent = {
+	weaponId: string,
+	angle: number,
+	power: number,
+}
+
+type BeginProjectile = () -> (boolean, string?)
 
 local ProjectileService = {}
 
 local shotSequence = 0
 local lastRequestAt: { [Player]: number } = {}
+local activeRemotes: Remotes? = nil
+local started = false
 
 local function isFinite(value: number): boolean
 	return value == value and value > -math.huge and value < math.huge
@@ -70,7 +81,8 @@ end
 
 local function simulateShot(
 	remotes: Remotes,
-	player: Player,
+	source: DamageSource,
+	actorUserId: number,
 	definition: ProjectileDefinition,
 	origin: Vector3,
 	velocity: Vector3,
@@ -87,7 +99,7 @@ local function simulateShot(
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	raycastParams.IgnoreWater = true
-	raycastParams.FilterDescendantsInstances = if player.Character then { player.Character } else {}
+	raycastParams.FilterDescendantsInstances = { source.model }
 
 	local function finish(
 		position: Vector3,
@@ -105,7 +117,7 @@ local function simulateShot(
 		end
 
 		local damageSucceeded, damageError =
-			pcall(DamageService.applyExplosion, position, definition, player)
+			pcall(DamageService.applyExplosion, position, definition, source)
 		if not damageSucceeded then
 			warn(string.format("[CritterClash] Explosion damage failed: %s", tostring(damageError)))
 		end
@@ -142,6 +154,7 @@ local function simulateShot(
 
 	remotes.combatEvent:FireAllClients("ProjectileLaunched", {
 		shotId = shotId,
+		shooterUserId = actorUserId,
 		weaponId = definition.id,
 		origin = origin,
 		velocity = velocity,
@@ -225,6 +238,87 @@ local function simulateShot(
 	end)
 end
 
+local function launchAuthoritativeShot(
+	remotes: Remotes,
+	source: DamageSource,
+	actorUserId: number,
+	definition: ProjectileDefinition,
+	angle: number,
+	power: number,
+	beginProjectile: BeginProjectile
+): (boolean, string?)
+	local model = source.model
+	if model.Parent == nil then
+		return false, "missing_character_root"
+	end
+	local root = model:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return false, "missing_character_root"
+	end
+
+	local rootPosition = root.Position
+	if
+		math.abs(rootPosition.X) > GameConfig.arenaHalfWidth
+		or math.abs(rootPosition.Z - GameConfig.combatPlaneZ) > 2
+	then
+		return false, "invalid_character_position"
+	end
+
+	local origin = Vector3.new(rootPosition.X, rootPosition.Y + 2.4, GameConfig.combatPlaneZ)
+	local speed = Weapons.resolveSpeed(definition, power)
+	local velocity = Ballistics.worldLaunchVelocity(angle, speed)
+	local acceleration = Ballistics.acceleration({
+		gravity = Vector3.new(0, -GameConfig.projectileWorldGravity, 0),
+		wind = Wind.asAcceleration(MatchService.getWind()),
+		gravityScale = definition.gravityScale,
+		windScale = definition.windScale,
+	})
+
+	local allowed, beginReason = beginProjectile()
+	if not allowed then
+		return false, beginReason or "shot_rejected"
+	end
+
+	shotSequence += 1
+	local seed = bit32.band(
+		bit32.bxor(
+			bit32.band(actorUserId, 0xFFFFFFFF),
+			bit32.lshift(bit32.band(shotSequence, 0xFFFF), 16),
+			0x6D2B79F5
+		),
+		0x7FFFFFFF
+	)
+	local shotId = string.format("%d:%d", actorUserId, shotSequence)
+	local launchError: any = nil
+	local launched = xpcall(function()
+		simulateShot(
+			remotes,
+			source,
+			actorUserId,
+			definition,
+			origin,
+			velocity,
+			acceleration,
+			shotId,
+			seed
+		)
+	end, function(problem: any): any
+		launchError = problem
+		return problem
+	end)
+	if not launched then
+		warn(
+			string.format(
+				"[CritterClash] Projectile launch failed before simulation started: %s",
+				tostring(launchError)
+			)
+		)
+		MatchService.finishProjectile()
+		return false, "server_simulation_error"
+	end
+	return true, nil
+end
+
 local function onFireRequested(remotes: Remotes, player: Player, request: unknown)
 	local now = os.clock()
 	local previous = lastRequestAt[player]
@@ -247,66 +341,33 @@ local function onFireRequested(remotes: Remotes, player: Player, request: unknow
 	end
 
 	local character = player.Character
-	local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
-	if not root or not root:IsA("BasePart") then
+	if not character then
 		reject(remotes, player, "missing_character_root")
 		return
 	end
-
-	local rootPosition = root.Position
-	if
-		math.abs(rootPosition.X) > GameConfig.arenaHalfWidth
-		or math.abs(rootPosition.Z - GameConfig.combatPlaneZ) > 2
-	then
-		reject(remotes, player, "invalid_character_position")
-		return
-	end
-
-	local origin = Vector3.new(rootPosition.X, rootPosition.Y + 2.4, GameConfig.combatPlaneZ)
-	local speed = Weapons.resolveSpeed(definition, power)
-	local velocity = Ballistics.worldLaunchVelocity(angle, speed)
-	local acceleration = Ballistics.acceleration({
-		gravity = Vector3.new(0, -GameConfig.projectileWorldGravity, 0),
-		wind = Wind.asAcceleration(MatchService.getWind()),
-		gravityScale = definition.gravityScale,
-		windScale = definition.windScale,
-	})
-
-	local allowed, beginReason = MatchService.beginProjectile(player)
-	if not allowed then
-		reject(remotes, player, beginReason or "shot_rejected")
-		return
-	end
-
-	shotSequence += 1
-	local seed = bit32.band(
-		bit32.bxor(
-			bit32.band(player.UserId, 0xFFFFFFFF),
-			bit32.lshift(bit32.band(shotSequence, 0xFFFF), 16),
-			0x6D2B79F5
-		),
-		0x7FFFFFFF
-	)
-	local shotId = string.format("%d:%d", player.UserId, shotSequence)
-	local launched = pcall(
-		simulateShot,
+	local launched, launchReason = launchAuthoritativeShot(
 		remotes,
-		player,
+		{
+			model = character,
+			player = player,
+		},
+		player.UserId,
 		definition,
-		origin,
-		velocity,
-		acceleration,
-		shotId,
-		seed
+		angle,
+		power,
+		function()
+			return MatchService.beginProjectile(player)
+		end
 	)
 	if not launched then
-		warn("[CritterClash] Projectile launch failed before simulation started")
-		reject(remotes, player, "server_simulation_error")
-		MatchService.finishProjectile()
+		reject(remotes, player, launchReason or "shot_rejected")
 	end
 end
 
 function ProjectileService.start(remotes: Remotes)
+	assert(not started, "ProjectileService may only be started once")
+	started = true
+	activeRemotes = remotes
 	remotes.requestFire.OnServerEvent:Connect(function(player, request)
 		onFireRequested(remotes, player, request)
 	end)
@@ -314,6 +375,42 @@ function ProjectileService.start(remotes: Remotes)
 	Players.PlayerRemoving:Connect(function(player)
 		lastRequestAt[player] = nil
 	end)
+end
+
+function ProjectileService.fireBot(
+	userId: number,
+	expectedMatchId: string,
+	expectedTurnToken: number,
+	model: Model,
+	request: ShotIntent
+): (boolean, string?)
+	local remotes = activeRemotes
+	if not remotes then
+		return false, "projectile_service_not_started"
+	end
+	local definition, angle, power, validationReason = validateRequest(request)
+	if not definition or not angle or not power then
+		return false, validationReason or "invalid_request"
+	end
+	return launchAuthoritativeShot(
+		remotes,
+		{
+			model = model,
+			player = nil,
+		},
+		userId,
+		definition,
+		angle,
+		power,
+		function()
+			return MatchService.beginBotProjectile(
+				userId,
+				expectedMatchId,
+				expectedTurnToken,
+				model
+			)
+		end
+	)
 end
 
 return ProjectileService

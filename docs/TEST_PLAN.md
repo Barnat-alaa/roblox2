@@ -99,15 +99,39 @@ Use fixed seeds and fixtures. A tolerance must reflect floating-point behavior, 
 
 Current Development evidence (2026-07-14):
 
-- Studio TestEZ passed 47 tests with 0 failures and 0 skipped tests.
+- The latest recorded Studio TestEZ run passed 56 tests with 0 failures and 0 skipped tests.
+  Current source contains 57 specs; the added tuning spec awaits a user-run Studio rerun.
 - A genuine one-server/two-client run completed elimination, authoritative Victory/Defeat
   Results, retained elimination across respawn, unanimous rematch consent, and a clean restart
   under a fresh match ID.
 - A solo last-player disconnect returned the server to clean `WaitingForPlayers` state.
-- The one-client/bot row remains open: the current solo TrainingTarget is passive and does not
-  satisfy bot turn/fire acceptance.
+- The server-owned bot is implemented with bounded/imperfect aim and the normal authoritative
+  turn/fire/projectile/damage/terrain/Result path. A live pre-final-tuning run verified bot
+  firing, human elimination, and DEFEAT Results.
+- The one-client/bot row is only partially accepted: the final-tuning rematch, clean reset,
+  Output review, and runtime/visual-feel pass remain user-run validation.
+- Trajectory preview is bounded to at most 48 raycasts per rebuild without the former
+  97-point path allocation; effects catch up at most 16 fixed steps per frame and early-out
+  while idle; HUD timed state updates at 10 Hz; terrain rebuilds one chunk per Heartbeat.
+- BotAim solves were observed at 3.43-5.65 ms. A Studio server snapshot measured 16.65 ms
+  p50, 17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. These observations do not
+  replace representative-device performance testing.
 - Rewards and profile persistence remain out of scope for this implemented slice; Results do
   not grant currency, XP, or items.
+
+Pending M5.2 user acceptance:
+
+1. Run Studio TestEZ from the current source and record all 57 specs passing before changing
+   the recorded runtime total.
+2. Start one server and one client, allow the BotCritter to take multiple turns, and confirm
+   turn label, bot health, camera focus, projectile, impact, damage, and terrain presentation.
+3. Finish a match, select Rematch, and confirm a fresh match ID, restored health, reset terrain,
+   valid bot identity, fresh turn state, and no unexpected Output error.
+4. Record whether aim preview, projectile follow, impacts, HUD updates, and chunk rebuilding
+   feel smooth in Studio. Treat this as user visual acceptance, not an automated pass.
+5. Capture one wide gameplay screenshot, one bot close-up, and one Results/HUD screenshot;
+   note silhouette readability, palette contrast, visual clutter, camera scale, and whether the
+   scene feels playful or generic. Use that feedback to drive the next code-art pass.
 
 Repeat with player leaving:
 

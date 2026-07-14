@@ -22,6 +22,7 @@ export type FireRequest = {
 
 export type ShotLaunch = {
 	shotId: string,
+	shooterUserId: number,
 	weaponId: string,
 	origin: Vector3,
 	velocity: Vector3,

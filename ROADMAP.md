@@ -27,23 +27,38 @@ Project Critter Clash is a temporary internal codename. This plan targets an ori
 
 ## Implementation checkpoint — 2026-07-14
 
-The authoritative 1v1 match-loop milestone is complete in the local Development build:
+The authoritative 1v1 match loop and M5.2 bot code are implemented in the local Development
+build:
 
-- the roster is frozen for each match, with late joiners spectating for the active match and
-  considered for open slots at the next boundary, while a passive TrainingTarget NPC fills
-  the solo opponent slot;
-- elimination remains authoritative across Roblox character respawns;
-- the server resolves one Result, presents Results, collects unanimous connected-human
-  rematch consent, and restarts with a fresh match ID;
-- rematch resets terrain, TrainingTarget, characters, wind, turns, and timers;
-- Studio TestEZ passed 47 tests, a genuine one-server/two-client match and rematch passed, and
-  a solo last-player disconnect returned to clean `WaitingForPlayers` state.
+- the roster is frozen for each match, late joiners spectate for the active match, and a
+  server-owned BotCritter fills the solo opponent slot;
+- the bot uses bounded, imperfect aim and the normal authoritative turn, projectile, damage,
+  terrain, elimination, Result, and rematch services;
+- elimination remains authoritative across Roblox character respawns, and rematch resets
+  terrain, bot, characters, wind, turns, and timers under a fresh match ID;
+- the latest recorded Studio TestEZ run passed 56 tests with 0 failures and 0 skipped; source
+  now contains 57 specs, so the added tuning spec awaits a user-run Studio rerun;
+- a live pre-final-tuning bot run verified authoritative firing, human elimination, and
+  DEFEAT Results. Final-tuning bot rematch and runtime/visual-feel acceptance remain user-run;
+- trajectory preview work is bounded to at most 48 raycasts without the former 97-point
+  allocation, effects catch up at most 16 steps per frame and idle early-out, HUD timed state
+  runs at 10 Hz, and terrain rebuilds one dirty chunk per Heartbeat;
+- the `0.3.0-dev` code-art pass adds an original low-part squirrel rival, layered backdrop,
+  and restrained lighting grade; screenshot feedback, production modelling, animation, and
+  asset review remain later art work;
+- Studio observations measured BotAim at 3.43-5.65 ms and a server snapshot at 16.65 ms p50,
+  17.72 ms p95, 18.04 ms p99, and 18.37 ms worst. These are development observations, not
+  production or representative-device guarantees.
 
-**Next milestone:** M5.2, the same-server bot opponent. It must aim with bounded error and use
-the normal authoritative turn, fire, damage, elimination, Results, and rematch paths. The
-TrainingTarget is passive and does not satisfy this milestone. The Results/reward portion of
-M5.3 is intentionally split: Results and rematch are complete, but profiles and idempotent
-coins/XP grants have not started. No Development or Production place has been published.
+**Immediate acceptance step:** run the current 57-spec suite in Studio, then complete and
+rematch a final-tuning one-server/one-client/bot match while checking Output and visual feel.
+
+**Next implementation milestone:** harden M2.2/M4.3 movement, grounding, support loss, and
+bounded settling. After that, continue the original broader plan: profiles and idempotent
+rewards, late-projectile recovery, mobile/accessibility, lobby/cosmetics/audio/analytics, and
+private publication only with owner approval. Results and rematch are implemented, but
+profiles and coins/XP grants have not started. No Development or Production place has been
+published.
 
 ## Seven-day private MVP
 
@@ -65,7 +80,7 @@ The critical path is repository and Studio sync → combat plane → turn author
 | ID | Task | Depends on | Estimate / owner | Acceptance and test | Principal risk / fallback |
 | --- | --- | --- | --- | --- | --- |
 | M2.1 | Implement the server-owned match/turn state machine and 20-second prototype timer; tune toward 18 from playtests | M1.3 | 2 h / NET | Only the active participant can act; timeout advances exactly once; disconnect does not deadlock | Collapse Movement and Aiming into one ActiveTurn state while retaining explicit transition guards |
-| M2.2 | Add bounded left/right movement and jump with plane, speed, distance, and arena validation | M1.4, M2.1 | 1.5 h / NET | Server rejects off-turn, over-speed, excess-distance, excess-jump, and out-of-bounds movement in two-client tests | Disable jumping and use a fixed movement-distance budget |
+| M2.2 | **HARDEN NEXT:** enforce bounded left/right movement and jump with plane, accumulated-distance, speed, jump-frequency, grounded-state, and arena validation | M1.4, M2.1 | 1.5 h / NET | Server rejects off-turn, over-speed, excess-distance, excess-jump, airborne-jump, and out-of-bounds movement in two-client tests | Disable jumping and use a fixed movement-distance budget |
 | M2.3 | Add angle, power, weapon selection, round wind, active-player HUD, health, and timer | M2.1 | 1.5 h / UI, GD | PC input reaches min/max values predictably; HUD clearly identifies actor, wind, weapon, and time | Use buttons/keys with discrete angle and power steps |
 | M2.4 | Build the first mobile input layout and safe-area/resolution pass | M2.3 | 1 h / UI, QA | Core controls work at representative phone and tablet emulation sizes with no overlap or hover requirement | Ship separate angle/power controls; defer drag-to-aim comparison |
 
@@ -88,7 +103,7 @@ The critical path is repository and Studio sync → combat plane → turn author
 | --- | --- | --- | --- | --- | --- |
 | M4.1 | Build an authoritative 2D cell grid with solid, empty, hazardous, and indestructible states | M1.4 | 1.5 h / NET | Map data loads deterministically; bounds and indestructible shell are validated | Use a small fixed map encoded as rows |
 | M4.2 | Render destructible grouped cells and replicate only changed cell batches | M4.1 | 2 h / ENG, NET | Both clients converge after a crater; unchanged regions are not rebuilt | Use coarser visible tiles and no meshing |
-| M4.3 | Apply circular crater masks, support loss, falling, hazard/out-of-world resolution, and spawn protection | M3.4, M4.2 | 2 h / NET | Edge, thin ledge, overlapping crater, spawn, and hazard tests resolve without desync or endless falling | Use kill-plane recovery/damage and indestructible spawn pads |
+| M4.3 | **HARDEN NEXT:** apply circular crater masks, explicit support loss, bounded falling/settling, hazard/out-of-world resolution, and spawn protection | M3.4, M4.2 | 2 h / NET | Edge, thin ledge, overlapping crater, spawn, and hazard tests resolve without desync or endless falling | Use kill-plane recovery/damage and indestructible spawn pads |
 | M4.4 | Add Mole Drill as a terrain-first second weapon using the same request and simulation path | M3.2, M4.3 | 0.5 h / GD, ENG | Drill removes a bounded path and has lower direct damage; duplicate requests remain harmless | Convert it to a straight low-damage projectile with a larger crater |
 
 **Day 4 gate:** an explosion visibly and consistently reshapes the battlefield without a full-map rebuild.
@@ -98,7 +113,7 @@ The critical path is repository and Studio sync → combat plane → turn author
 | ID | Task | Depends on | Estimate / owner | Acceptance and test | Principal risk / fallback |
 | --- | --- | --- | --- | --- | --- |
 | M5.1 | Configure Fizzy Bomb and Bubble Bouncer with fuse/bounce limits, completing four original weapons | M3.1, M4.3 | 1.5 h / GD, ENG | Each weapon has a distinct legal trajectory and readable role; all terminate within lifetime bounds | Ship two polished weapons and show the other two as unavailable previews |
-| M5.2 | **NEXT:** add an imperfect bot that selects a target, estimates a basic shot, applies difficulty error, and uses normal fire validation | M3.2 | 1.5 h / ENG, GD | Bot fires before timeout and can finish a match without hidden damage or perfect information | Bot uses Acorn Cannon only with a bounded lookup/search |
+| M5.2 | **IMPLEMENTED; USER VALIDATION PENDING:** an imperfect bot selects a target, solves a bounded shot with difficulty error, and uses normal fire validation | M3.2 | 1.5 h / ENG, GD | Bot fires before timeout and can finish/rematch a match without hidden damage or perfect information; final-tuning runtime signoff remains open | Bot uses Acorn Cannon/Mole Drill through a bounded deterministic search |
 | M5.3 | **PARTIAL:** Results and immediate rematch are complete; retain the stable result identity needed for a later exactly-once coins/XP grant | M3.4 | 1 h / DATA, UI | Win/loss is clear; rematch begins cleanly; repeated result calls resolve once | Keep rewards disabled until profiles are writable |
 | M5.4 | Add versioned profile load/save, session lease, retry/autosave, shutdown handling, and environment-specific store names; then complete the idempotent reward grant | M5.3 result identity | 2 h / DATA, NET | Leave/rejoin retains test progression; repeated result keys grant once; concurrent session and migration tests are safe; failure never overwrites with defaults | Save coins, XP, one equipped cosmetic, and receipt/reward IDs only; disable rewards if the profile is not writable |
 

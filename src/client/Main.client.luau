@@ -33,6 +33,7 @@ type MatchState = {
 
 type ShotLaunch = {
 	shotId: string,
+	shooterUserId: number,
 	weaponId: string,
 	origin: Vector3,
 	velocity: Vector3,
@@ -143,6 +144,7 @@ local function parseShotLaunch(value: any): ShotLaunch?
 	end
 
 	local shotId = payload.shotId
+	local shooterUserId = finiteNumber(payload.shooterUserId)
 	local weaponId = payload.weaponId
 	local origin = finiteVector(payload.origin)
 	local velocity = finiteVector(payload.velocity)
@@ -152,6 +154,7 @@ local function parseShotLaunch(value: any): ShotLaunch?
 	if
 		type(shotId) ~= "string"
 		or shotId == ""
+		or not shooterUserId
 		or type(weaponId) ~= "string"
 		or not origin
 		or not velocity
@@ -164,6 +167,7 @@ local function parseShotLaunch(value: any): ShotLaunch?
 
 	return {
 		shotId = shotId,
+		shooterUserId = shooterUserId,
 		weaponId = weaponId,
 		origin = origin,
 		velocity = velocity,

@@ -9,6 +9,11 @@ local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
 
 type ProjectileDefinition = Weapons.ProjectileDefinition
 
+export type DamageSource = {
+	model: Model,
+	player: Player?,
+}
+
 local DamageService = {}
 
 local function modelFromPart(part: BasePart): Model?
@@ -33,7 +38,7 @@ end
 function DamageService.applyExplosion(
 	origin: Vector3,
 	definition: ProjectileDefinition,
-	owner: Player
+	source: DamageSource
 ): { [Model]: number }
 	local overlapParams = OverlapParams.new()
 	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -58,7 +63,9 @@ function DamageService.applyExplosion(
 		end
 
 		local owningPlayer = Players:GetPlayerFromCharacter(model)
-		if owningPlayer == owner and not definition.canDamageOwner then
+		local belongsToSource = model == source.model
+			or (source.player ~= nil and owningPlayer == source.player)
+		if belongsToSource and not definition.canDamageOwner then
 			continue
 		end
 

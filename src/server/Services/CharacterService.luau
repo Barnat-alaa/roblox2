@@ -55,6 +55,16 @@ local function isParticipantState(player: Player): boolean
 	return lifecycleByPlayer[player] == "Participant" and player.Parent == Players
 end
 
+local function hasLivingCharacter(player: Player): boolean
+	local character = player.Character
+	if not character then
+		return false
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	return humanoid ~= nil and humanoid.Health > 0 and root ~= nil and root:IsA("BasePart")
+end
+
 local function configureCharacterRoot(player: Player, character: Model, root: BasePart)
 	if player.Character ~= character then
 		return
@@ -298,7 +308,9 @@ function CharacterService.configureMatch(participants: { Player }, reloadCharact
 			included[player] = true
 			table.insert(connectedParticipants, player)
 			local spawnX = spawnXForSlot(#connectedParticipants)
-			local needsReload = reloadCharacters == true or inFlightReloadGeneration[player] ~= nil
+			local needsReload = reloadCharacters == true
+				or inFlightReloadGeneration[player] ~= nil
+				or not hasLivingCharacter(player)
 			nextLifecycle[player] = if needsReload then "Loading" else "Participant"
 			nextSpawnX[player] = spawnX
 			if needsReload then

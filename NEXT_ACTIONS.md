@@ -11,16 +11,17 @@ rojo serve default.project.json
 
 ## Highest priority
 
-1. Add the same-server bot.
-   - Fill an otherwise empty opponent slot through the normal authoritative turn, fire,
-     damage, elimination, MatchEnd, and rematch paths.
-   - Keep aim bounded, imperfect, and deterministic enough to test.
-2. Strengthen movement and terrain-support settling.
+1. Finish the user-run M5.2 acceptance pass.
+   - Run Studio TestEZ against the current source and record the expected 57-spec result.
+   - Complete a final-tuning one-server/one-client/bot match and rematch, checking turn
+     ownership, bot identity/health, projectile and terrain presentation, Results, clean
+     reset, Output, and visual feel.
+2. Implement the next roadmap milestone: movement, grounding, and terrain-support hardening.
    - Validate accumulated movement distance, jump frequency, grounded state, and explicit
      knockback exceptions.
    - Detect support removal, apply bounded settling, and resolve hazard/death outcomes before
      handing off the turn.
-3. Add profiles only after the bot-enabled match loop is stable.
+3. Add profiles and rewards only after the bot acceptance and movement/support pass are stable.
    - Implement session locking, migrations, autosave, shutdown handling, and a read-only
      fallback.
    - Grant idempotent rewards from a stable MatchEnd result identity.
@@ -29,9 +30,13 @@ rojo serve default.project.json
 Do not add rewards to Results until profiles, stable result identities, and idempotent grants
 are implemented and tested.
 
-## Completed match-loop validation
+## M5.2 implementation evidence
 
-- Studio TestEZ completed with 47 passed, 0 failed, and 0 skipped.
+- The server-owned BotCritter uses bounded, imperfect aim and enters the normal authoritative
+  turn, fire, damage, terrain, elimination, Result, and rematch paths.
+- Static analysis, strict analysis, and both Rojo builds are clean.
+- The latest recorded Studio TestEZ run completed with 56 passed, 0 failed, and 0 skipped.
+  Source now contains 57 specs; the new tuning spec awaits the user-run runtime pass.
 - The final playable build booted clean. Initial server/client terrain revision 0 matched;
   real Acorn and Mole Drill requests produced the expected 0 → 1 deltas, protected terrain
   remained, the hazard run existed, and death-height elimination was observed.
@@ -40,12 +45,17 @@ are implemented and tested.
   unanimous rematch consent, and cleanly restarted both players under a fresh match ID.
 - A solo last-player disconnect returned the match service to clean `WaitingForPlayers`
   state.
+- A live pre-final-tuning bot run fired through the authoritative projectile path, eliminated
+  the human participant, and showed the DEFEAT Results interface.
+- Bot aim solving was observed at 3.43-5.65 ms in Studio. A server snapshot measured 16.65 ms
+  p50, 17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. Treat these as Studio
+  observations, not production or representative-device guarantees.
 - Temporary smoke scripts were removed, and a clean restart produced only the expected
   development startup message.
 
-The passive solo TrainingTarget validates lifecycle behavior but is not the planned bot. The
-next validation target is a one-server/one-client/bot match and rematch through the same
-authoritative paths.
+Bot code is implemented, but the final-tuning rematch and runtime/visual-feel pass are not
+complete until the user records them in Studio. After that acceptance pass, continue with
+movement, grounding, and terrain-support hardening.
 
 ## Owner actions eventually required
 

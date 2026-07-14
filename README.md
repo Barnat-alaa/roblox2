@@ -23,22 +23,33 @@ foundation:
 - protected spawn supports and bottom cells, a small server-lethal central hazard, and
   server-enforced death-height elimination;
 - a frozen 1v1 roster, with late joiners held as spectators for the active match and eligible
-  to fill an open slot at the next boundary, plus a passive TrainingTarget NPC for solo
-  validation;
+  to fill an open slot at the next boundary, plus a server-owned BotCritter that uses bounded,
+  imperfect aim and the normal authoritative turn/fire path for solo matches;
 - persistent elimination state that remains authoritative across Roblox character respawns;
 - one authoritative match result, a Results interface, unanimous human rematch consent, and
-  a fresh-match reset of terrain, target, characters, wind, turns, and timers;
+  a fresh-match reset of terrain, bot, characters, wind, turns, and timers;
 - a side-view client camera, aim controls, trajectory preview, and combat HUD;
-- 47 TestEZ tests, lint/format configuration, and reproducible Rojo builds;
+- an original code-built red-squirrel rival, layered hill/cloud/sun backdrop, and restrained
+  atmosphere, bloom, and colour grading as the first low-cost visual-direction pass;
+- bounded client fluidity work: no 97-point trajectory allocation, at most 48 preview
+  raycasts per rebuild, 16 effect catch-up steps per frame, a 10 Hz HUD cadence, and one
+  terrain chunk rebuild per Heartbeat;
+- 57 TestEZ specs in source, lint/format configuration, and reproducible Rojo builds;
 - a CI workflow with pinned tooling, build validation, and a basic secret scan.
 
-Static analysis and both Rojo builds are clean. Studio TestEZ reports **47 passed, 0 failed,
-0 skipped**, and the final match-loop build booted clean. Live Acorn and Mole Drill smoke
-shots produced matching revisioned terrain deltas while protected terrain remained intact.
-A genuine Studio one-server/two-client match completed through Results and a unanimous
-rematch, and a solo last-player disconnect returned the server to clean `WaitingForPlayers`
-state. The next milestone is an active same-server bot opponent; the current TrainingTarget
-does not take turns or fire.
+Static analysis, strict analysis, and both Rojo builds are clean. The latest recorded Studio
+TestEZ run reports **56 passed, 0 failed, 0 skipped**; source now contains 57 specs, so the
+added tuning test still needs a user-run Studio rerun. A live pre-final-tuning bot match
+verified authoritative bot firing, human elimination, and the DEFEAT Results flow. Final bot
+rematch and runtime/visual-feel validation remain user-run acceptance work. In Studio, bot
+aim solving was observed at 3.43-5.65 ms, while a server snapshot measured 16.65 ms p50,
+17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. These are development observations,
+not production or representative-device guarantees. The next implementation milestone is
+movement, grounding, and terrain-support hardening.
+
+The current Development build identifies itself as `0.3.0-dev`. Character and environment
+art remain editable programmer-art foundations; screenshot feedback will drive the next
+silhouette, palette, scale, and readability pass before any production asset work.
 
 See [CURRENT_STATUS.md](CURRENT_STATUS.md), [ROADMAP.md](ROADMAP.md), and
 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) before continuing development.
