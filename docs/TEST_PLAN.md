@@ -97,6 +97,18 @@ Use fixed seeds and fixtures. A tolerance must reflect floating-point behavior, 
 | gamepad emulation/hardware | smoke | required if advertised | focus navigation, glyphs, aim/power |
 | high latency/loss simulation | best effort | required where Studio supports | prediction, timeout, duplicate/reorder tolerance |
 
+Current Development evidence (2026-07-14):
+
+- Studio TestEZ passed 47 tests with 0 failures and 0 skipped tests.
+- A genuine one-server/two-client run completed elimination, authoritative Victory/Defeat
+  Results, retained elimination across respawn, unanimous rematch consent, and a clean restart
+  under a fresh match ID.
+- A solo last-player disconnect returned the server to clean `WaitingForPlayers` state.
+- The one-client/bot row remains open: the current solo TrainingTarget is passive and does not
+  satisfy bot turn/fire acceptance.
+- Rewards and profile persistence remain out of scope for this implemented slice; Results do
+  not grant currency, XP, or items.
+
 Repeat with player leaving:
 
 - while queued;

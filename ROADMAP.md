@@ -25,6 +25,26 @@ Project Critter Clash is a temporary internal codename. This plan targets an ori
 | OPS | repository, CI, environments, publishing, and rollback |
 | OWNER | account-holder approvals and Creator Dashboard actions |
 
+## Implementation checkpoint — 2026-07-14
+
+The authoritative 1v1 match-loop milestone is complete in the local Development build:
+
+- the roster is frozen for each match, with late joiners spectating for the active match and
+  considered for open slots at the next boundary, while a passive TrainingTarget NPC fills
+  the solo opponent slot;
+- elimination remains authoritative across Roblox character respawns;
+- the server resolves one Result, presents Results, collects unanimous connected-human
+  rematch consent, and restarts with a fresh match ID;
+- rematch resets terrain, TrainingTarget, characters, wind, turns, and timers;
+- Studio TestEZ passed 47 tests, a genuine one-server/two-client match and rematch passed, and
+  a solo last-player disconnect returned to clean `WaitingForPlayers` state.
+
+**Next milestone:** M5.2, the same-server bot opponent. It must aim with bounded error and use
+the normal authoritative turn, fire, damage, elimination, Results, and rematch paths. The
+TrainingTarget is passive and does not satisfy this milestone. The Results/reward portion of
+M5.3 is intentionally split: Results and rematch are complete, but profiles and idempotent
+coins/XP grants have not started. No Development or Production place has been published.
+
 ## Seven-day private MVP
 
 The critical path is repository and Studio sync → combat plane → turn authority → ballistic shot → damage and elimination → terrain deltas → complete match → persistence → private publish.
@@ -78,9 +98,9 @@ The critical path is repository and Studio sync → combat plane → turn author
 | ID | Task | Depends on | Estimate / owner | Acceptance and test | Principal risk / fallback |
 | --- | --- | --- | --- | --- | --- |
 | M5.1 | Configure Fizzy Bomb and Bubble Bouncer with fuse/bounce limits, completing four original weapons | M3.1, M4.3 | 1.5 h / GD, ENG | Each weapon has a distinct legal trajectory and readable role; all terminate within lifetime bounds | Ship two polished weapons and show the other two as unavailable previews |
-| M5.2 | Add an imperfect bot that selects a target, estimates a basic shot, applies difficulty error, and uses normal fire validation | M3.2 | 1.5 h / ENG, GD | Bot fires before timeout and can finish a match without hidden damage or perfect information | Bot uses Acorn Cannon only with a bounded lookup/search |
-| M5.3 | Add results, immediate rematch, coins, account XP, and exactly-once match reward ledger | M3.4 | 1 h / DATA, UI | Win/loss is clear; rematch begins cleanly; repeated result calls grant once | Keep fixed rewards and disable quest/bonus multipliers |
-| M5.4 | Add versioned profile load/save, session lease, retry/autosave, shutdown handling, and environment-specific store names | M5.3 | 2 h / DATA, NET | Leave/rejoin retains test progression; concurrent session and migration tests are safe; failure never overwrites with defaults | Save coins, XP, one equipped cosmetic, and receipt/reward IDs only; disable rewards if the profile is not writable |
+| M5.2 | **NEXT:** add an imperfect bot that selects a target, estimates a basic shot, applies difficulty error, and uses normal fire validation | M3.2 | 1.5 h / ENG, GD | Bot fires before timeout and can finish a match without hidden damage or perfect information | Bot uses Acorn Cannon only with a bounded lookup/search |
+| M5.3 | **PARTIAL:** Results and immediate rematch are complete; retain the stable result identity needed for a later exactly-once coins/XP grant | M3.4 | 1 h / DATA, UI | Win/loss is clear; rematch begins cleanly; repeated result calls resolve once | Keep rewards disabled until profiles are writable |
+| M5.4 | Add versioned profile load/save, session lease, retry/autosave, shutdown handling, and environment-specific store names; then complete the idempotent reward grant | M5.3 result identity | 2 h / DATA, NET | Leave/rejoin retains test progression; repeated result keys grant once; concurrent session and migration tests are safe; failure never overwrites with defaults | Save coins, XP, one equipped cosmetic, and receipt/reward IDs only; disable rewards if the profile is not writable |
 
 **Day 5 gate:** a new player can finish and rematch a bot match, then rejoin with rewards intact.
 

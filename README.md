@@ -10,7 +10,8 @@ relationship with another game are prohibited.
 
 ## Current development slice
 
-The repository contains the first server-authoritative combat and terrain foundation:
+The repository contains the server-authoritative combat, terrain, and complete 1v1 match-loop
+foundation:
 
 - deterministic shared ballistics, wind, weapon, and damage rules;
 - a server-owned turn/fire boundary with request validation;
@@ -21,14 +22,23 @@ The repository contains the first server-authoritative combat and terrain founda
   clips at the grid boundary and protected terrain;
 - protected spawn supports and bottom cells, a small server-lethal central hazard, and
   server-enforced death-height elimination;
+- a frozen 1v1 roster, with late joiners held as spectators for the active match and eligible
+  to fill an open slot at the next boundary, plus a passive TrainingTarget NPC for solo
+  validation;
+- persistent elimination state that remains authoritative across Roblox character respawns;
+- one authoritative match result, a Results interface, unanimous human rematch consent, and
+  a fresh-match reset of terrain, target, characters, wind, turns, and timers;
 - a side-view client camera, aim controls, trajectory preview, and combat HUD;
-- 37 TestEZ specifications, lint/format configuration, and reproducible Rojo builds;
+- 47 TestEZ tests, lint/format configuration, and reproducible Rojo builds;
 - a CI workflow with pinned tooling, build validation, and a basic secret scan.
 
-Static analysis and both Rojo builds are clean. Studio TestEZ reports **37 passed, 0 failed,
-0 skipped**, and the final terrain-enabled playable build booted clean. Live Acorn and Mole
-Drill smoke shots produced matching revisioned terrain deltas while protected terrain
-remained intact. A separate two-client validation has not yet been recorded.
+Static analysis and both Rojo builds are clean. Studio TestEZ reports **47 passed, 0 failed,
+0 skipped**, and the final match-loop build booted clean. Live Acorn and Mole Drill smoke
+shots produced matching revisioned terrain deltas while protected terrain remained intact.
+A genuine Studio one-server/two-client match completed through Results and a unanimous
+rematch, and a solo last-player disconnect returned the server to clean `WaitingForPlayers`
+state. The next milestone is an active same-server bot opponent; the current TrainingTarget
+does not take turns or fire.
 
 See [CURRENT_STATUS.md](CURRENT_STATUS.md), [ROADMAP.md](ROADMAP.md), and
 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) before continuing development.

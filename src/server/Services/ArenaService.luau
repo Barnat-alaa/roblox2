@@ -125,4 +125,17 @@ function ArenaService.createGreybox(): Model
 	return arena
 end
 
+function ArenaService.resetTrainingTarget(arena: Model, enabled: boolean): Model?
+	for _, child in arena:GetChildren() do
+		if child.Name == "TrainingTarget" then
+			child:Destroy()
+		end
+	end
+
+	if not enabled then
+		return nil
+	end
+	return createTrainingTarget(arena)
+end
+
 return ArenaService

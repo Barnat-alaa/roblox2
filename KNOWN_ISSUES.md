@@ -4,13 +4,14 @@
 
 - The inspected owner place is unpublished; verified playtests currently use generated local
   `.rbxlx` builds rather than a published Development place.
-- Static analysis and both Rojo builds pass. Studio TestEZ completed with 37 passed, 0 failed,
-  and 0 skipped; the final playable terrain smoke also booted and restarted cleanly.
-- A separate one-server, two-client validation has not yet been recorded.
+- Static analysis and both Rojo builds pass. Studio TestEZ completed with 47 passed, 0 failed,
+  and 0 skipped; a genuine one-server/two-client match and rematch and a solo last-player
+  disconnect recovery both passed in Studio.
 - Bot turns, persistent profiles, rewards, matchmaking, cosmetics, and monetisation are not
   yet implemented.
-- Eliminations are not retained independently of Roblox respawns, so MatchEnd, results, and
-  rematch cannot complete reliably.
+- The solo TrainingTarget is a passive lifecycle target, not a bot: it does not aim, take
+  legal turns, or fire through the authoritative combat path.
+- Results currently grant no coins, XP, items, or persistent progress.
 - Terrain collision and client rendering now follow terrain edits, but support loss relies on
   Roblox physics; explicit support detection and bounded settling remain incomplete.
 - Movement is plane/distance constrained, but accumulated movement, jump frequency, and ground
@@ -26,7 +27,7 @@
 
 - Select and clear a final public name.
 - Complete original production art, audio, and asset-licence review.
-- Complete MatchEnd, results, rematch, and same-server bot flow.
+- Complete and validate the same-server bot flow.
 - Add session-locked persistent data with migrations and shutdown tests.
 - Complete multiplayer, exploit, mobile, performance, and rollback testing.
 - Publish only after the Creator Dashboard maturity questionnaire and tester permissions are

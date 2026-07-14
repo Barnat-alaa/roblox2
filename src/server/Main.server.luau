@@ -18,7 +18,7 @@ local arena = ArenaService.createGreybox()
 local remotes = NetworkService.create()
 TerrainService.start(remotes, arena)
 CharacterService.start()
-MatchService.start(remotes)
+MatchService.start(remotes, arena)
 ProjectileService.start(remotes)
 
 workspace:SetAttribute("CritterClashBooted", true)

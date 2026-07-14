@@ -35,6 +35,7 @@ local grid: Grid? = nil
 local collisionRoot: Folder? = nil
 local remotes: Remotes? = nil
 local revision = 0
+local resetCount = 0
 local started = false
 local lastSnapshotAt: { [Player]: number } = {}
 
@@ -266,6 +267,7 @@ local function updateDiagnostics()
 	root:SetAttribute("ChunkSize", CHUNK_SIZE)
 	root:SetAttribute("TerrainDepth", TERRAIN_DEPTH)
 	Workspace:SetAttribute("CritterClashTerrainRevision", revision)
+	Workspace:SetAttribute("CritterClashTerrainResetCount", resetCount)
 end
 
 local function sendSnapshot(player: Player)
@@ -486,6 +488,7 @@ function TerrainService.start(networkRemotes: Remotes, arena: Model)
 	remotes = networkRemotes
 	grid = createInitialGrid()
 	revision = 0
+	resetCount = 0
 
 	for _, legacyName in { "Ground", "LeftShelf", "RightShelf" } do
 		local legacy = arena:FindFirstChild(legacyName)
@@ -521,6 +524,78 @@ end
 
 function TerrainService.applyImpact(position: Vector3, radius: number): number
 	return commitDeltas(planCircle(position, radius))
+end
+
+function TerrainService.reset(): number
+	local currentRoot = collisionRoot
+	local currentGrid = grid
+	assert(
+		started and currentGrid ~= nil and currentRoot ~= nil,
+		"TerrainService must be started before reset"
+	)
+	local rootParent = currentRoot.Parent
+	assert(rootParent ~= nil, "terrain collision root must have a parent")
+
+	local nextGrid = createInitialGrid()
+	local nextRoot = Instance.new("Folder")
+	nextRoot.Name = COLLISION_ROOT_NAME
+
+	local built, buildError = pcall(function()
+		local chunkColumns = math.ceil(nextGrid.width / CHUNK_SIZE)
+		local chunkRows = math.ceil(nextGrid.height / CHUNK_SIZE)
+		for chunkY = 1, chunkRows do
+			for chunkX = 1, chunkColumns do
+				buildChunk(nextGrid, chunkX, chunkY).Parent = nextRoot
+			end
+		end
+	end)
+	if not built then
+		nextRoot:Destroy()
+		error(string.format("terrain reset staging failed: %s", tostring(buildError)))
+	end
+
+	-- Parent and publish the complete replacement while the old root is still
+	-- available for rollback. Only retire old collision after diagnostics commit.
+	local previousRevision = revision
+	local previousResetCount = resetCount
+	local committed, commitError = pcall(function()
+		nextRoot.Parent = rootParent
+		grid = nextGrid
+		collisionRoot = nextRoot
+		revision = previousRevision + 1
+		resetCount = previousResetCount + 1
+		updateDiagnostics()
+	end)
+	if not committed then
+		grid = currentGrid
+		collisionRoot = currentRoot
+		revision = previousRevision
+		resetCount = previousResetCount
+		nextRoot:Destroy()
+		pcall(updateDiagnostics)
+		error(string.format("terrain reset commit failed: %s", tostring(commitError)))
+	end
+	currentRoot:Destroy()
+
+	for _, player in Players:GetPlayers() do
+		local sendError = "unknown snapshot error"
+		local sent = xpcall(function()
+			sendSnapshot(player)
+		end, function(message)
+			sendError = tostring(message)
+			return message
+		end)
+		if not sent then
+			warn(
+				string.format(
+					"[CritterClash] Terrain reset snapshot failed for %d: %s",
+					player.UserId,
+					tostring(sendError)
+				)
+			)
+		end
+	end
+	return revision
 end
 
 function TerrainService.clipDrillEndpoint(startPosition: Vector3, endPosition: Vector3): Vector3

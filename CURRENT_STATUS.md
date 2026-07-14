@@ -1,15 +1,15 @@
 # Current Status
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## Environment
 
-- Roblox Studio MCP connected to the local `Place1` session.
+- Roblox Studio MCP was verified against generated local `.rbxlx` sessions.
 - Reversible MCP verification passed: edit, play, server inspection, Output inspection, stop,
   and cleanup all succeeded.
 - The inspected owner place is an unpublished blank place (`PlaceId = 0`,
   `UniverseId = 0`); the repository builds a separate local Development place.
-- The terrain-enabled Development build has not been published.
+- The match-loop Development build has not been published.
 - Git remote: `https://github.com/Barnat-alaa/roblox2.git`.
 
 ## Implemented
@@ -26,9 +26,17 @@ Last updated: 2026-07-13
   rate-limited snapshot resync.
 - Acorn/projectile crater integration and a bounded Mole Drill path that clips at grid
   boundaries and protected terrain.
+- A frozen 1v1 match roster. A solo human is paired with a passive TrainingTarget NPC, while
+  players who join an active match spectate and may fill an open slot at the next boundary.
+- Authoritative participant lifecycle and elimination state that remains eliminated across
+  Roblox character respawns.
+- Exactly-once authoritative Result resolution, a Results interface, and unanimous connected-
+  human rematch readiness.
+- Clean rematch reset of terrain, TrainingTarget, characters, wind, turn state, and timers
+  under a fresh match ID.
 - Side-view camera, aim controls, trajectory preview, combat HUD, and predictive projectile
   presentation.
-- Automated format, lint, package, Rojo build, and a 37-case TestEZ project setup.
+- Automated format, lint, package, Rojo build, and a 47-case TestEZ project setup.
 
 ## Validation record
 
@@ -40,7 +48,7 @@ Current terrain-enabled build validation on Windows:
 - `selene src tests scripts`: 0 errors, 0 warnings, 0 parse errors.
 - Roblox-aware strict `luau-lsp analyze`: passed.
 - Production and test Rojo builds: passed.
-- Studio TestEZ: **37 passed, 0 failed, 0 skipped**.
+- Studio TestEZ: **47 passed, 0 failed, 0 skipped**.
 - The final terrain-enabled playable build booted clean with matching initial server/client
   terrain revision 0 and an active central hazard collision run.
 - A real Acorn request produced Delta 0 → 1 with 9 changed cells; server and client both
@@ -48,9 +56,16 @@ Current terrain-enabled build validation on Windows:
 - In a separate clean run, a real Mole Drill request produced Delta 0 → 1 with 10 changed
   cells while the protected boundary runs remained intact.
 - A temporary server smoke observed death-height elimination.
+- A genuine Studio one-server/two-client run completed an elimination, showed the correct
+  Victory/Defeat Results interfaces, retained the eliminated player across respawn, collected
+  readiness from both humans, and restarted both clients into a fresh match.
+- The two-client rematch reset terrain to revision 1, restored both participants to full
+  health at their stable spawn slots, removed the solo TrainingTarget, and resumed in the
+  aiming phase under a fresh match ID.
+- A solo last-player disconnect returned the server to clean `WaitingForPlayers` state with
+  no stale match ID.
 - All temporary smoke scripts were removed. After a clean restart, Output contained only the
   expected development startup message.
-- This validation did not include a separately recorded two-client run.
 
 A published experience, cloud data, monetisation product, and production deployment have not
 been created.
@@ -72,9 +87,10 @@ been created.
 
 ## Open development gaps
 
-- Eliminations are not retained independently of Roblox respawns; MatchEnd, results, and
-  rematch flow are not implemented.
-- Bot fill, matchmaking, profiles, rewards, cosmetics, and monetisation are not implemented.
+- The solo TrainingTarget is passive. A same-server bot that takes legal turns through the
+  normal authoritative fire and match paths is the next milestone.
+- Matchmaking, profiles, rewards, cosmetics, and monetisation are not implemented. Results
+  currently grant no coins, XP, or persistent progress.
 - Terrain support loss currently relies on Roblox physics plus hazard/death-height checks;
   explicit support detection and bounded settling need a stronger design.
 - Movement still needs accumulated-distance, jump-frequency, and grounded-state validation.

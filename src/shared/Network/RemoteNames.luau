@@ -7,6 +7,8 @@ return table.freeze({
 	selectWeapon = "SelectWeapon",
 	combatEvent = "CombatEvent",
 	matchState = "MatchState",
+	matchEvent = "MatchEvent",
+	requestRematch = "RequestRematch",
 	terrainEvent = "TerrainEvent",
 	requestTerrainSnapshot = "RequestTerrainSnapshot",
 })
