@@ -12,6 +12,11 @@ export type Remotes = {
 	matchState: RemoteEvent,
 	matchEvent: RemoteEvent,
 	requestRematch: RemoteEvent,
+	requestLobbyAction: RemoteEvent,
+	lobbyEvent: RemoteEvent,
+	requestEquipCosmetic: RemoteEvent,
+	requestSettings: RemoteEvent,
+	requestCombatSnapshot: RemoteEvent,
 	terrainEvent: RemoteEvent,
 	requestTerrainSnapshot: RemoteEvent,
 }
@@ -52,6 +57,11 @@ function NetworkService.create(): Remotes
 		matchState = getOrCreateRemote(folder, RemoteNames.matchState),
 		matchEvent = getOrCreateRemote(folder, RemoteNames.matchEvent),
 		requestRematch = getOrCreateRemote(folder, RemoteNames.requestRematch),
+		requestLobbyAction = getOrCreateRemote(folder, RemoteNames.requestLobbyAction),
+		lobbyEvent = getOrCreateRemote(folder, RemoteNames.lobbyEvent),
+		requestEquipCosmetic = getOrCreateRemote(folder, RemoteNames.requestEquipCosmetic),
+		requestSettings = getOrCreateRemote(folder, RemoteNames.requestSettings),
+		requestCombatSnapshot = getOrCreateRemote(folder, RemoteNames.requestCombatSnapshot),
 		terrainEvent = getOrCreateRemote(folder, RemoteNames.terrainEvent),
 		requestTerrainSnapshot = getOrCreateRemote(folder, RemoteNames.requestTerrainSnapshot),
 	}) :: Remotes

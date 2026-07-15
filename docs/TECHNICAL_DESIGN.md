@@ -33,7 +33,8 @@ Core invariants:
 
 ### Shared
 
-- Immutable definitions: weapons, maps, characters, progression, economy, products, analytics.
+- Immutable definitions: weapons, maps, characters, progression, economy, cosmetics,
+  settings, lobby, products, and telemetry.
 - Pure simulation: Ballistics, Wind, Damage, and TerrainGrid.
 - Types, identifiers, serialization schemas, validation helpers, and network names.
 - Shared code must not access client-only UI or server-only data APIs.
@@ -47,23 +48,34 @@ Core invariants:
 - DamageService: falloff, line of sight if enabled, once-only damage, knockback, health.
 - CharacterService: spawn, plane constraint, movement validation, death/recovery.
 - BotService: target/weapon selection, imperfect aim search, and legal action timing.
-- QueueService: same-server queue, bot deadline, cancellation, and rematch.
+- LobbyService: same-server Practice/Casual admission, FIFO queue, bot deadline, idempotent
+  cancellation, replicated lobby state, Return to Camp, and match-lifecycle reconciliation.
 - DataService: implemented profile session, schema migration, ordered operations, autosave,
   shutdown, and read-only/failure state; cloud behavior still needs published Development
   validation.
 - EconomyService: implemented authoritative MatchEnd eligibility, reward calculation, and
-  idempotent retained-ledger grant enqueue. Ownership, equip, receipt processing, and a
-  durable crash-recovery outbox remain later work.
-- Analytics/SecurityService: schema-safe events, rate limits, anomaly counters, redacted logs.
+  idempotent retained-ledger grant enqueue. Receipt processing and a durable crash-recovery
+  outbox remain later work.
+- CustomizationService: exact request validation, ownership/equip/settings admission,
+  per-player and server-wide budgets, authoritative result messages, and telemetry dedupe.
+- CosmeticService: generation-guarded code-built appearance that is nonphysical and never
+  changes combat state.
+- TelemetryService: versioned allowlist, redacted Development diagnostics, and bounded
+  Workspace counters; no client-authored event payload path exists.
 
 ### Client
 
-- InputController normalizes keyboard, touch, and gamepad actions.
-- CameraController owns presentation modes and comfort settings.
+- LobbyController owns field-camp navigation, queue state/countdown, shortcuts, and gamepad
+  focus without deciding admission.
+- InputController normalizes keyboard, touch, and gamepad combat actions; MovementController
+  adds left-stick/keyboard intent and bounded jump requests.
+- CameraController owns presentation modes and applies the local shake multiplier.
 - Aim/Trajectory controllers display local intent and approximate preview.
 - UIController renders server state and local selection without deciding outcomes.
-- Effects/Audio controllers pool transient presentation and respect reduced-effects settings.
-- Tutorial/Shop controllers request validated progress/equipment/purchase actions.
+- Effects/Trajectory controllers bound transient presentation and respect reduced-effects
+  settings. Audio fields are reserved, but no audio controller/assets ship in this slice.
+- LoadoutController previews owned starter cosmetics and requests equip; SettingsController
+  applies local comfort values immediately and reconciles server results.
 - ProfileController reads server-owned profile attributes and renders storage/status, balance,
   XP, and derived level; ResultsController presents pending/resolved reward feedback.
 
@@ -163,6 +175,13 @@ All payloads have strict type/size checks, finite-number checks, match membershi
 | S→C | Player profile attributes | storage/status, coins, XP, derived level/progress | server-owned view; excludes lease and processed-reward ledger |
 | S→C | RewardResolved | match ID, status, granted coins/XP, server time | presentation only; client cannot request or alter a grant |
 
+Phase 3/4 extends this contract with exact-shape `SettingsPatch`, payload-free and rate-limited
+`CombatSnapshotRequest`, and server-owned `LobbyEvent` state/profile-action results. Equip and
+settings requests are rejected before expensive persistence work unless they pass allowlist,
+ownership/type/range, nonempty-patch, per-player, and server-wide admission checks. The
+projectile snapshot returns only the retained presentation launch and never damage, collision,
+terrain, or match authority.
+
 No remote accepts target Instance, damage, health, reward amount, hit position, shot origin, terrain cells, receipt status, or match winner from a client.
 
 ## Damage and knockback
@@ -183,16 +202,18 @@ Search has a time/candidate cap. If no candidate is found, it fires a conservati
 
 ### MVP profile
 
-- Current schema v1 stores schema/economy version, bounded integer coins and XP, integer
-  matches/wins/losses/draws, and a dense processed-match-reward ledger capped at 64 entries.
+- Current schema v2 stores schema/economy version, bounded integer coins and XP, integer
+  matches/wins/losses/draws, a dense processed-match-reward ledger capped at 64 entries,
+  bounded owned/equipped cosmetic state, and normalized comfort/settings state.
 - Level is derived from XP with `150 + 50 x (level - 1)` per next level and a level-100 cap;
   it is not a second persisted source of truth.
 - Each reward entry stores its stable key, coins, XP, grant time, outcome, and player/bot mode.
-- Missing data receives the explicit starter profile. Schema v0 accepts bounded coins plus
-  exactly one of `xp` or legacy `experience`; corrupt, ambiguous, unsupported, and future
-  schemas fail safely.
-- Owned/equipped cosmetics, settings, receipts, mastery, quests, and seasons are not part of
-  schema v1 and require reviewed migrations when implemented.
+- Missing data receives the explicit starter profile and Sunset Scout Scarf. Schema v0 accepts
+  bounded coins plus exactly one of `xp` or legacy `experience`; schema v1 preserves economy,
+  statistics, and retained grants while adding default inventory/settings. Corrupt,
+  ambiguous, unsupported, and future schemas fail safely.
+- Music/SFX values are persisted for forward-compatible original audio, but playback is not
+  implemented. Receipts, mastery, quests, and seasons still require reviewed migrations.
 
 ### Session and write behavior
 
@@ -210,6 +231,10 @@ Search has a time/candidate cap. If no candidate is found, it fires a conservati
   environment, match, and player identity and deliberately excludes economy/reward version;
   changing reward configuration must not regrant the same completion. A future commerce key
   uses the platform purchase identity.
+- Equip/settings mutations share the per-profile serialized worker and lease-protected
+  UpdateAsync path. The pending mutation queue is capped, adjacent settings patches coalesce,
+  conflicting equips retain order, no-op writes are skipped only when safe, and ambiguous
+  failures reconcile against the authoritative stored profile before reporting success.
 - In an unpublished Studio place, DataService deliberately selects a process-local
   session-memory adapter. This is useful for integration tests but has no cross-session or
   cross-server durability and is never described as a cloud persistence pass.
@@ -231,19 +256,33 @@ The DataService interface isolates callers from the storage implementation so a 
 
 ## Matchmaking and rematch
 
-MVP QueueService maintains an in-server FIFO for valid players. When two are present it starts 1v1; after an approximately eight-second configurable wait it offers/starts a bot match. Cancellation and disconnect remove entries idempotently.
+LobbyService is the only normal match-admission owner. Practice starts one human with a bot
+as soon as the single arena is available. Casual maintains an in-server FIFO: the oldest two
+eligible Casual players receive a human 1v1; otherwise an entry bot-fills after approximately
+eight seconds. A Practice entry is not held behind a lone Casual search. Token-scoped cancel,
+disconnect, invalid-character pruning, and failed admission requeue/remove entries
+idempotently.
 
-Rematch creates a fresh match ID, turn seed, arena state, and reward key while retaining consenting participants. It must not reuse projectile, terrain revision, timer, or result state.
+The selected roster is frozen into MatchService. Rematch requires the exact original
+connected human roster and creates a fresh match ID, turn seed, arena, reward key, projectile
+state, terrain revision, timer, health, and bot. Return to Camp opts that participant out and
+cannot import a spectator or newly queued player.
 
 Limited beta may add MemoryStore queues and reserved match servers only after expiry, duplicate assignment, teleport failure, party, reconnection, and low-population behavior are load-tested.
 
 ## Camera, UI, and effects
 
 - Camera is local and never informs collision. Modes have cancellable transition tokens so late projectile events cannot steal the camera.
+- The server retains at most one active launch presentation payload. A late client may request
+  that payload once per second; the original server timestamp lets the bounded client solver
+  catch up without per-frame replication or outcome authority.
 - Server timer is a deadline timestamp; clients display remaining time and correct drift rather than owning a countdown.
 - UI state is derived from the latest versioned snapshot plus local uncommitted aim/input.
-- Effects and audio use bounded pools, lifetime cleanup, and reduced-effects budgets.
+- Effects use bounded instances, lifetime cleanup, and reduced-effects budgets. Audio is not
+  shipped until original, provenance-cleared assets exist.
 - Responsive layout covers phone, tablet, desktop, and safe areas. Input glyphs follow the active input mode.
+- UI scale, camera shake, and reduced effects apply locally immediately, then reconcile to the
+  server-owned schema-v2 settings snapshot. Combat HUD/touch controls are hidden in Lobby.
 
 ## Environments and feature flags
 
@@ -260,7 +299,8 @@ Configuration validation fails builds with duplicate IDs, unknown references, in
 - src/shared/Config, Simulation, Types, Network, Utilities
 - src/server/Services and Main.server.luau
 - src/client/Controllers and Main.client.luau
-- tests for pure simulation, turn order, idempotency, receipts, and migrations
+- tests for pure simulation, turn/lobby order, idempotency, profiles/migrations, cosmetics,
+  settings, and telemetry schemas
 - assets for editable sources, concepts, approved exports, and manifests
 - docs for design, security, analytics, licensing, and release evidence
 
@@ -285,7 +325,8 @@ Profile projectile steps, dirty-chunk rebuilds, character physics, part count, d
 - Every match/projectile/impact/reward has a correlation ID.
 - Logs include build, environment, state, IDs, reason code, and redacted context; never passwords, tokens, chat, email, or unnecessary personal data.
 - Invalid remote attempts increment rate/anomaly counters without echoing hostile payloads.
-- Data, receipt, state timeout, revision gap, and cleanup errors emit structured analytics/diagnostics.
+- Data, state timeout, revision gap, and cleanup errors emit structured diagnostics. Current
+  telemetry is a Development-only allowlisted JSON/Workspace sink, not a Production backend.
 - Feature flags can disable commerce, experimental weapons, four-player mode, or analytics without corrupting profiles.
 - A known-good build/place version, production data snapshot/version path, smoke test, and rollback owner are required before release.
 

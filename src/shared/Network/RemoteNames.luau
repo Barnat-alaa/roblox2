@@ -9,6 +9,11 @@ return table.freeze({
 	matchState = "MatchState",
 	matchEvent = "MatchEvent",
 	requestRematch = "RequestRematch",
+	requestLobbyAction = "RequestLobbyAction",
+	lobbyEvent = "LobbyEvent",
+	requestEquipCosmetic = "RequestEquipCosmetic",
+	requestSettings = "RequestSettings",
+	requestCombatSnapshot = "RequestCombatSnapshot",
 	terrainEvent = "TerrainEvent",
 	requestTerrainSnapshot = "RequestTerrainSnapshot",
 })

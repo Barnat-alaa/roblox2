@@ -8,13 +8,19 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local EnvironmentConfig = require(ReplicatedStorage.Shared.Config.EnvironmentConfig)
+local Cosmetics = require(ReplicatedStorage.Shared.Config.Cosmetics)
+local CosmeticRules = require(ReplicatedStorage.Shared.Progression.CosmeticRules)
 local ProfileRules = require(ReplicatedStorage.Shared.Progression.ProfileRules)
 local RewardRules = require(ReplicatedStorage.Shared.Progression.RewardRules)
 local SessionRules = require(ReplicatedStorage.Shared.Progression.SessionRules)
+local SettingsRules = require(ReplicatedStorage.Shared.Progression.SettingsRules)
+local TelemetryService = require(script.Parent.TelemetryService)
 
 type Profile = ProfileRules.Profile
 type Lease = SessionRules.Lease
 type MatchRewardContext = RewardRules.MatchRewardContext
+type SettingsPatch = SettingsRules.SettingsPatch
+type Settings = SettingsRules.Settings
 
 export type ProfileStatus = "Loading" | "Ready" | "ReadOnly" | "Unavailable" | "Released"
 export type ProfileStorage = "Persistent" | "SessionMemory" | "ReadOnly" | "Unavailable"
@@ -37,6 +43,13 @@ export type RewardResult = {
 	experience: number,
 }
 export type RewardCallback = (result: RewardResult) -> ()
+export type MutationResultStatus = "Applied" | "Rejected" | "ReadOnly" | "Unavailable"
+export type MutationResult = {
+	status: MutationResultStatus,
+	reason: string?,
+	settings: Settings?,
+}
+export type MutationCallback = (result: MutationResult) -> ()
 
 type StoredProfile = {
 	formatVersion: number,
@@ -55,7 +68,18 @@ type RewardItem = {
 }
 type RenewItem = { kind: "Renew" }
 type ReleaseItem = { kind: "Release" }
-type QueueItem = LoadItem | RewardItem | RenewItem | ReleaseItem
+type EquipCosmeticItem = {
+	kind: "EquipCosmetic",
+	cosmeticId: string,
+	callbacks: { MutationCallback },
+}
+type SettingsItem = {
+	kind: "Settings",
+	patch: SettingsPatch,
+	callbacks: { MutationCallback },
+}
+type MutationItem = EquipCosmeticItem | SettingsItem
+type QueueItem = LoadItem | RewardItem | RenewItem | ReleaseItem | MutationItem
 
 type ProfileRecord = {
 	player: Player,
@@ -71,6 +95,8 @@ type ProfileRecord = {
 	acceptingRewards: boolean,
 	releaseQueued: boolean,
 	renewQueued: boolean,
+	sessionTelemetryEmitted: boolean,
+	pendingMutationCount: number,
 }
 
 type DecodeKind = "Empty" | "Safe" | "Future" | "Corrupt"
@@ -94,11 +120,18 @@ type RewardPersistenceResult = {
 	grant: ProfileRules.ProcessedReward?,
 	reason: string?,
 }
+type MutationPersistenceResult = {
+	kind: PersistenceResultKind,
+	value: StoredProfile?,
+	reason: string?,
+}
 
 local FORMAT_VERSION = 1
 local MAX_SAFE_INTEGER = 9_007_199_254_740_991
 local DIAGNOSTIC_LIMIT = 1_000_000_000
 local BUDGET_POLL_SECONDS = 0.2
+local MAX_PENDING_MUTATIONS = 4
+local MAX_CALLBACKS_PER_MUTATION = 8
 
 -- Keep environment reads centralized. This makes a reviewed Development ->
 -- Staging/Production configuration swap obvious and prevents accidental stores.
@@ -136,6 +169,8 @@ local random = Random.new()
 
 local rewardsGranted = 0
 local rewardsDuplicate = 0
+local mutationsApplied = 0
+local mutationsRejected = 0
 local storageFailures = 0
 
 local ENVELOPE_FIELDS: { [string]: boolean } = table.freeze({
@@ -265,6 +300,7 @@ local function setDiagnostics()
 	local unavailableCount = 0
 	local loadingCount = 0
 	local queueDepth = 0
+	local pendingMutationDepth = 0
 	local recordCount = 0
 	for _, record in records do
 		recordCount += 1
@@ -278,6 +314,7 @@ local function setDiagnostics()
 			loadingCount += 1
 		end
 		queueDepth += math.max(0, #record.queue - record.queueHead + 1)
+		pendingMutationDepth += record.pendingMutationCount
 	end
 
 	Workspace:SetAttribute("CritterClashProfileEnvironment", EnvironmentConfig.name)
@@ -290,8 +327,14 @@ local function setDiagnostics()
 		math.min(DIAGNOSTIC_LIMIT, unavailableCount)
 	)
 	Workspace:SetAttribute("CritterClashProfileQueueDepth", math.min(DIAGNOSTIC_LIMIT, queueDepth))
+	Workspace:SetAttribute(
+		"CritterClashProfileMutationQueueDepth",
+		math.min(DIAGNOSTIC_LIMIT, pendingMutationDepth)
+	)
 	Workspace:SetAttribute("CritterClashProfileRewardsGranted", rewardsGranted)
 	Workspace:SetAttribute("CritterClashProfileRewardsDuplicate", rewardsDuplicate)
+	Workspace:SetAttribute("CritterClashProfileMutationsApplied", mutationsApplied)
+	Workspace:SetAttribute("CritterClashProfileMutationsRejected", mutationsRejected)
 	Workspace:SetAttribute("CritterClashProfileStorageFailures", storageFailures)
 end
 
@@ -324,14 +367,89 @@ local function publishRecord(record: ProfileRecord)
 	player:SetAttribute("ProfileLevel", level)
 	player:SetAttribute("ProfileXPIntoLevel", xpIntoLevel)
 	player:SetAttribute("ProfileXPForNextLevel", xpForNextLevel)
+	local profile = record.profile
+	local settings = if profile then profile.settings else SettingsRules.createDefault()
+	player:SetAttribute(
+		"ProfileOwnedCosmetics",
+		if profile then table.concat(profile.inventory.ownedCosmetics, ",") else ""
+	)
+	player:SetAttribute(
+		"ProfileEquippedCosmetic",
+		if profile then profile.inventory.equippedCosmetic else ""
+	)
+	player:SetAttribute("SettingMusicVolume", settings.musicVolume)
+	player:SetAttribute("SettingSfxVolume", settings.sfxVolume)
+	player:SetAttribute("SettingCameraShake", settings.cameraShake)
+	player:SetAttribute("SettingReducedEffects", settings.reducedEffects)
+	player:SetAttribute("SettingUIScale", settings.uiScale)
 	-- Status is the commit marker observed by the client controller.
 	player:SetAttribute("ProfileStatus", record.status)
+end
+
+local function mutationResult(
+	status: MutationResultStatus,
+	reason: string?,
+	profile: Profile?
+): MutationResult
+	local result: MutationResult = {
+		status = status,
+		reason = reason,
+		settings = if profile then SettingsRules.clone(profile.settings) else nil,
+	}
+	return table.freeze(result)
+end
+
+local function deferMutationCallback(callback: MutationCallback, result: MutationResult)
+	task.defer(function()
+		local ok, callbackError = pcall(function()
+			callback(result)
+		end)
+		if not ok then
+			warn(
+				string.format(
+					"[CritterClash] profile mutation callback failed: %s",
+					tostring(callbackError)
+				)
+			)
+		end
+	end)
+end
+
+local function equipCallbacks(item: EquipCosmeticItem): { MutationCallback }
+	return item.callbacks
+end
+
+local function settingsCallbacks(item: SettingsItem): { MutationCallback }
+	return item.callbacks
+end
+
+local function resolveCallbacks(callbacks: { MutationCallback }, result: MutationResult)
+	for _, callback in callbacks do
+		deferMutationCallback(callback, result)
+	end
+end
+
+local function resolveMutation(item: MutationItem, result: MutationResult)
+	if item.kind == "EquipCosmetic" then
+		resolveCallbacks(equipCallbacks(item), result)
+	else
+		resolveCallbacks(settingsCallbacks(item), result)
+	end
 end
 
 local function setStatus(record: ProfileRecord, status: ProfileStatus)
 	record.status = status
 	publishRecord(record)
 	setDiagnostics()
+	if not record.sessionTelemetryEmitted and status ~= "Loading" then
+		record.sessionTelemetryEmitted = true
+		local storage: string = if status == "ReadOnly"
+			then "ReadOnly"
+			elseif status == "Unavailable" or status == "Released" then "Unavailable"
+			elseif record.storage == "SessionMemory" then "SessionMemory"
+			else "Persistent"
+		TelemetryService.emit("session_started", { storage = storage })
+	end
 end
 
 local function rewardResult(
@@ -978,6 +1096,238 @@ local function processReward(record: ProfileRecord, item: RewardItem)
 	deferCallback(item.callback, rewardResult("Unavailable", 0, 0))
 end
 
+local function mutateProfile(profile: Profile, item: MutationItem): (Profile?, string?)
+	local updated = ProfileRules.clone(profile)
+	if item.kind == "EquipCosmetic" then
+		local inventory, reason = CosmeticRules.equip(updated.inventory, item.cosmeticId)
+		if not inventory then
+			return nil, reason or "equip_rejected"
+		end
+		updated.inventory = inventory
+	else
+		local settings, reason = SettingsRules.applyPatch(updated.settings, item.patch)
+		if not settings then
+			return nil, reason or "settings_rejected"
+		end
+		updated.settings = settings
+	end
+
+	local valid, reason = ProfileRules.validate(updated)
+	if not valid then
+		return nil, reason or "invalid_mutated_profile"
+	end
+	return updated, nil
+end
+
+local function mutationSatisfied(profile: Profile, item: MutationItem): boolean
+	if item.kind == "EquipCosmetic" then
+		return profile.inventory.equippedCosmetic == item.cosmeticId
+	end
+	local settings = profile.settings
+	local patch = item.patch
+	return (patch.musicVolume == nil or settings.musicVolume == patch.musicVolume)
+		and (patch.sfxVolume == nil or settings.sfxVolume == patch.sfxVolume)
+		and (patch.cameraShake == nil or settings.cameraShake == patch.cameraShake)
+		and (patch.reducedEffects == nil or settings.reducedEffects == patch.reducedEffects)
+		and (patch.uiScale == nil or settings.uiScale == patch.uiScale)
+end
+
+local function applyMutationInSessionMemory(
+	item: MutationItem,
+	record: ProfileRecord
+): MutationPersistenceResult
+	local current = sessionMemory[record.key]
+	if not current then
+		return { kind = "Corrupt", reason = "profile_missing_during_mutation" }
+	end
+	local stored = cloneStored(current)
+	local acquisition, acquisitionReason = SessionRules.acquire(
+		stored.session,
+		SERVER_OWNER_ID,
+		currentUnixTime(),
+		LEASE_DURATION_SECONDS
+	)
+	if not acquisition then
+		return { kind = "Corrupt", value = stored, reason = acquisitionReason }
+	end
+	if acquisition.status == "Locked" then
+		return { kind = "Locked", value = stored, reason = "session_locked" }
+	end
+
+	local profile, mutationReason = mutateProfile(stored.profile, item)
+	if not profile then
+		return { kind = "Rejected", value = stored, reason = mutationReason }
+	end
+	local nextStored: StoredProfile = {
+		formatVersion = FORMAT_VERSION,
+		profile = profile,
+		session = cloneLease(acquisition.lease),
+	}
+	sessionMemory[record.key] = cloneStored(nextStored)
+	return { kind = "Ready", value = cloneStored(nextStored) }
+end
+
+local function applyMutationInDataStore(
+	item: MutationItem,
+	record: ProfileRecord
+): MutationPersistenceResult
+	local store = getNativeStore()
+	if not store then
+		return { kind = "Failed", reason = "data_store_unavailable" }
+	end
+
+	local disposition: PersistenceResultKind = "Failed"
+	local observed: StoredProfile? = nil
+	local dispositionReason: string? = nil
+	local ok, updatedValue, requestError = runDataStoreRequest(
+		Enum.DataStoreRequestType.UpdateAsync,
+		function()
+			return store:UpdateAsync(record.key, function(currentValue: any)
+				local decoded, decodeKind, decodeReason = decodeStored(currentValue)
+				if decodeKind ~= "Safe" or not decoded then
+					disposition = if decodeKind == "Future" then "Future" else "Corrupt"
+					dispositionReason = decodeReason or "profile_missing_during_mutation"
+					return nil
+				end
+				observed = cloneStored(decoded)
+
+				local acquisition, acquisitionReason = SessionRules.acquire(
+					decoded.session,
+					SERVER_OWNER_ID,
+					currentUnixTime(),
+					LEASE_DURATION_SECONDS
+				)
+				if not acquisition then
+					disposition = "Corrupt"
+					dispositionReason = acquisitionReason or "lease_failed"
+					return nil
+				end
+				if acquisition.status == "Locked" then
+					disposition = "Locked"
+					dispositionReason = "session_locked"
+					return nil
+				end
+
+				local profile, mutationReason = mutateProfile(decoded.profile, item)
+				if not profile then
+					disposition = "Rejected"
+					dispositionReason = mutationReason or "mutation_rejected"
+					return nil
+				end
+				local nextStored: StoredProfile = {
+					formatVersion = FORMAT_VERSION,
+					profile = profile,
+					session = cloneLease(acquisition.lease),
+				}
+				disposition = "Ready"
+				observed = cloneStored(nextStored)
+				dispositionReason = nil
+				return encodeStored(nextStored)
+			end)
+		end
+	)
+	if not ok then
+		return { kind = "Failed", value = observed, reason = requestError }
+	end
+	if disposition ~= "Ready" then
+		return { kind = disposition, value = observed, reason = dispositionReason }
+	end
+	local decoded, decodeKind, decodeReason = decodeStored(updatedValue)
+	if decodeKind ~= "Safe" or not decoded then
+		return {
+			kind = if decodeKind == "Future" then "Future" else "Corrupt",
+			reason = decodeReason or "invalid_mutation_update_result",
+		}
+	end
+	return { kind = "Ready", value = decoded }
+end
+
+local function applySafeMutationFallback(record: ProfileRecord, item: MutationItem): boolean
+	if record.storage ~= "DataStore" then
+		return false
+	end
+	local fallback = readDataStore(record.key)
+	if fallback.kind ~= "Ready" or not fallback.value then
+		record.profile = nil
+		record.session = nil
+		setStatus(record, "Unavailable")
+		resolveMutation(item, mutationResult("Unavailable", "write_unconfirmed"))
+		return true
+	end
+
+	local stored = fallback.value
+	record.profile = ProfileRules.clone(stored.profile)
+	local session = stored.session
+	if session and SessionRules.isActiveOwner(session, SERVER_OWNER_ID, currentUnixTime()) then
+		record.session = cloneLease(session)
+		setStatus(record, "Ready")
+		if mutationSatisfied(stored.profile, item) then
+			mutationsApplied = saturatingIncrement(mutationsApplied)
+			setDiagnostics()
+			resolveMutation(item, mutationResult("Applied", nil, stored.profile))
+		else
+			resolveMutation(item, mutationResult("Unavailable", "write_unconfirmed"))
+		end
+	else
+		record.session = nil
+		setStatus(record, "ReadOnly")
+		resolveMutation(item, mutationResult("ReadOnly", "session_lost"))
+	end
+	return true
+end
+
+local function processMutation(record: ProfileRecord, item: MutationItem)
+	if record.status == "ReadOnly" then
+		resolveMutation(item, mutationResult("ReadOnly", "profile_read_only"))
+		return
+	end
+	if record.status ~= "Ready" then
+		resolveMutation(item, mutationResult("Unavailable", "profile_unavailable"))
+		return
+	end
+	local profile = record.profile
+	if profile and mutationSatisfied(profile, item) then
+		resolveMutation(item, mutationResult("Applied", "unchanged", profile))
+		return
+	end
+
+	local result = if record.storage == "SessionMemory"
+		then applyMutationInSessionMemory(item, record)
+		else applyMutationInDataStore(item, record)
+	if result.kind == "Ready" and result.value then
+		record.profile = ProfileRules.clone(result.value.profile)
+		record.session = if result.value.session then cloneLease(result.value.session) else nil
+		mutationsApplied = saturatingIncrement(mutationsApplied)
+		publishRecord(record)
+		setDiagnostics()
+		resolveMutation(item, mutationResult("Applied", nil, record.profile))
+		return
+	end
+	if result.kind == "Rejected" then
+		mutationsRejected = saturatingIncrement(mutationsRejected)
+		setDiagnostics()
+		resolveMutation(item, mutationResult("Rejected", result.reason))
+		return
+	end
+	if result.kind == "Failed" and applySafeMutationFallback(record, item) then
+		return
+	end
+	if result.kind == "Locked" then
+		if record.storage == "DataStore" and applySafeMutationFallback(record, item) then
+			return
+		end
+		record.session = nil
+		setStatus(record, "ReadOnly")
+		resolveMutation(item, mutationResult("ReadOnly", "session_locked"))
+		return
+	end
+
+	record.profile = nil
+	record.session = nil
+	setStatus(record, "Unavailable")
+	resolveMutation(item, mutationResult("Unavailable", result.reason))
+end
+
 local function renewInSessionMemory(record: ProfileRecord): PersistenceResult
 	local current = sessionMemory[record.key]
 	if not current then
@@ -1241,6 +1591,11 @@ local function handleWorkerFailure(record: ProfileRecord, item: QueueItem, worke
 		record.session = nil
 		setStatus(record, "Unavailable")
 		deferCallback(item.callback, rewardResult("Unavailable", 0, 0))
+	elseif item.kind == "EquipCosmetic" or item.kind == "Settings" then
+		record.profile = nil
+		record.session = nil
+		setStatus(record, "Unavailable")
+		resolveMutation(item, mutationResult("Unavailable", "mutation_worker_failed"))
 	elseif item.kind == "Release" then
 		record.session = nil
 		setStatus(record, "Released")
@@ -1295,6 +1650,8 @@ runWorker = function(record: ProfileRecord)
 				loadRecord(record)
 			elseif item.kind == "Reward" then
 				processReward(record, item)
+			elseif item.kind == "EquipCosmetic" or item.kind == "Settings" then
+				processMutation(record, item)
 			elseif item.kind == "Renew" then
 				processRenew(record)
 			elseif item.kind == "Release" then
@@ -1303,6 +1660,9 @@ runWorker = function(record: ProfileRecord)
 		end)
 		if item.kind == "Renew" then
 			record.renewQueued = false
+		end
+		if item.kind == "EquipCosmetic" or item.kind == "Settings" then
+			record.pendingMutationCount = math.max(0, record.pendingMutationCount - 1)
 		end
 		if not ok then
 			handleWorkerFailure(record, item, workerError)
@@ -1360,6 +1720,8 @@ local function addPlayer(player: Player)
 		acceptingRewards = true,
 		releaseQueued = false,
 		renewQueued = false,
+		sessionTelemetryEmitted = false,
+		pendingMutationCount = 0,
 	}
 	records[player] = record
 	publishRecord(record)
@@ -1465,6 +1827,220 @@ function DataService.enqueueMatchReward(
 		request = request,
 		context = context,
 		callback = callback,
+	})
+	return "Accepted"
+end
+
+local function recordForMutation(
+	player: Player,
+	callback: MutationCallback
+): (ProfileRecord?, EnqueueStatus)
+	local record = records[player]
+	if not record or not record.acceptingRewards or record.releaseQueued or shuttingDown then
+		deferMutationCallback(callback, mutationResult("Unavailable", "profile_unavailable"))
+		return nil, "Unavailable"
+	end
+	if record.status == "ReadOnly" then
+		deferMutationCallback(callback, mutationResult("ReadOnly", "profile_read_only"))
+		return nil, "ReadOnly"
+	end
+	if record.status == "Unavailable" or record.status == "Released" then
+		deferMutationCallback(callback, mutationResult("Unavailable", "profile_unavailable"))
+		return nil, "Unavailable"
+	end
+	return record, "Accepted"
+end
+
+local function rejectMutationQueue(callback: MutationCallback): EnqueueStatus
+	mutationsRejected = saturatingIncrement(mutationsRejected)
+	setDiagnostics()
+	deferMutationCallback(callback, mutationResult("Rejected", "mutation_queue_full"))
+	return "Unavailable"
+end
+
+local function coalesceEquip(
+	record: ProfileRecord,
+	cosmeticId: string,
+	callback: MutationCallback
+): boolean
+	for index = #record.queue, record.queueHead, -1 do
+		local item = record.queue[index]
+		if item.kind == "Release" then
+			return false
+		end
+		if item.kind == "EquipCosmetic" then
+			if item.cosmeticId == cosmeticId then
+				if #item.callbacks >= MAX_CALLBACKS_PER_MUTATION then
+					return false
+				end
+				table.insert(item.callbacks, callback)
+				return true
+			end
+			-- Never merge across a newer conflicting equip; order is user intent.
+			return false
+		end
+	end
+	return false
+end
+
+local function mergeSettingsPatch(target: SettingsPatch, source: SettingsPatch)
+	if source.musicVolume ~= nil then
+		target.musicVolume = source.musicVolume
+	end
+	if source.sfxVolume ~= nil then
+		target.sfxVolume = source.sfxVolume
+	end
+	if source.cameraShake ~= nil then
+		target.cameraShake = source.cameraShake
+	end
+	if source.reducedEffects ~= nil then
+		target.reducedEffects = source.reducedEffects
+	end
+	if source.uiScale ~= nil then
+		target.uiScale = source.uiScale
+	end
+end
+
+local function coalesceSettings(
+	record: ProfileRecord,
+	patch: SettingsPatch,
+	callback: MutationCallback
+): boolean
+	for index = #record.queue, record.queueHead, -1 do
+		local item = record.queue[index]
+		if item.kind == "Release" then
+			return false
+		end
+		if item.kind == "Settings" then
+			if #item.callbacks >= MAX_CALLBACKS_PER_MUTATION then
+				return false
+			end
+			mergeSettingsPatch(item.patch, patch)
+			table.insert(item.callbacks, callback)
+			return true
+		end
+	end
+	return false
+end
+
+function DataService.enqueueEquipCosmetic(
+	player: Player,
+	cosmeticId: unknown,
+	callback: MutationCallback
+): EnqueueStatus
+	if
+		type(cosmeticId) ~= "string"
+		or #cosmeticId < 1
+		or #cosmeticId > Cosmetics.MAX_COSMETIC_ID_LENGTH
+		or Cosmetics.get(cosmeticId) == nil
+		or typeof(callback) ~= "function"
+	then
+		if typeof(callback) == "function" then
+			deferMutationCallback(callback, mutationResult("Rejected", "invalid_cosmetic_id"))
+		end
+		return "Unavailable"
+	end
+	local record, status = recordForMutation(player, callback)
+	if not record then
+		return status :: EnqueueStatus
+	end
+	if coalesceEquip(record, cosmeticId, callback) then
+		return "Accepted"
+	end
+	if
+		record.pendingMutationCount == 0
+		and record.profile
+		and record.profile.inventory.equippedCosmetic == cosmeticId
+	then
+		deferMutationCallback(callback, mutationResult("Applied", "unchanged", record.profile))
+		return "Accepted"
+	end
+	if record.pendingMutationCount >= MAX_PENDING_MUTATIONS then
+		return rejectMutationQueue(callback)
+	end
+	record.pendingMutationCount += 1
+	enqueueItem(record, {
+		kind = "EquipCosmetic",
+		cosmeticId = cosmeticId,
+		callbacks = { callback },
+	})
+	return "Accepted"
+end
+
+local function cloneSettingsPatch(value: unknown): (SettingsPatch?, string?)
+	local defaults = SettingsRules.createDefault()
+	local validated, reason = SettingsRules.applyPatch(defaults, value)
+	if not validated or typeof(value) ~= "table" then
+		return nil, reason or "invalid_settings_patch"
+	end
+	local raw = value :: { [any]: any }
+	local patch: SettingsPatch = {}
+	local fieldCount = 0
+	if raw.musicVolume ~= nil then
+		patch.musicVolume = raw.musicVolume
+		fieldCount += 1
+	end
+	if raw.sfxVolume ~= nil then
+		patch.sfxVolume = raw.sfxVolume
+		fieldCount += 1
+	end
+	if raw.cameraShake ~= nil then
+		patch.cameraShake = raw.cameraShake
+		fieldCount += 1
+	end
+	if raw.reducedEffects ~= nil then
+		patch.reducedEffects = raw.reducedEffects
+		fieldCount += 1
+	end
+	if raw.uiScale ~= nil then
+		patch.uiScale = raw.uiScale
+		fieldCount += 1
+	end
+	if fieldCount == 0 then
+		return nil, "empty_settings_patch"
+	end
+	return patch, nil
+end
+
+function DataService.enqueueSettings(
+	player: Player,
+	patchValue: unknown,
+	callback: MutationCallback
+): EnqueueStatus
+	if typeof(callback) ~= "function" then
+		return "Unavailable"
+	end
+	local patch, reason = cloneSettingsPatch(patchValue)
+	if not patch then
+		deferMutationCallback(callback, mutationResult("Rejected", reason))
+		return "Unavailable"
+	end
+	local record, status = recordForMutation(player, callback)
+	if not record then
+		return status :: EnqueueStatus
+	end
+	if coalesceSettings(record, patch, callback) then
+		return "Accepted"
+	end
+	if record.pendingMutationCount == 0 and record.profile then
+		local probe: SettingsItem = {
+			kind = "Settings",
+			patch = patch,
+			callbacks = {},
+		}
+		if mutationSatisfied(record.profile, probe) then
+			deferMutationCallback(callback, mutationResult("Applied", "unchanged", record.profile))
+			return "Accepted"
+		end
+	end
+	if record.pendingMutationCount >= MAX_PENDING_MUTATIONS then
+		return rejectMutationQueue(callback)
+	end
+	record.pendingMutationCount += 1
+	enqueueItem(record, {
+		kind = "Settings",
+		patch = patch,
+		callbacks = { callback },
 	})
 	return "Accepted"
 end

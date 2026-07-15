@@ -74,6 +74,11 @@ CI commands use the repository’s pinned tool configuration. At minimum, CI mus
 | PAY-001 | receipts | duplicate/delayed/unknown/cancel/data failure/already owned | no lost or duplicate grant; safe retry/pending behavior |
 | DATA-001 | migrations | every supported version, corrupt/missing field, repeated migration | valid current schema or explicit safe failure; repeat is stable |
 | DATA-002 | sessions | concurrent lease, stale lease, autosave/remove/shutdown race | one writer; no default overwrite; bounded recovery |
+| DATA-003 | profile mutations | equip ordering/no-op, settings coalescing/reversal, queue full, ambiguous write, leave | lease owner only; last accepted intent persists; every callback resolves once |
+| COS-001 | cosmetics | known/unknown, owned/unowned, default equip, respawn generation | only enabled owned IDs equip; appearance is nonphysical and stale tasks stop |
+| SET-001 | settings | exact/partial/empty/extra, NaN/infinity, min/max, normalization | valid nonempty patches apply; malformed values never mutate |
+| LOB-001 | lobby rules | malformed requests, Practice priority, Casual FIFO pair, bot deadline, cancellation token | deterministic legal selection with no duplicate roster/admission |
+| TEL-001 | telemetry | every event, missing/extra field, type/range/text bounds, unknown event | only exact allowlisted bounded payloads sanitize |
 
 Use fixed seeds and fixtures. A tolerance must reflect floating-point behavior, not hide large trajectory drift.
 
@@ -104,7 +109,7 @@ Use fixed seeds and fixtures. A tolerance must reflect floating-point behavior, 
 Current Development evidence (2026-07-15):
 
 - The latest recorded Studio TestEZ run passed 56 tests with 0 failures and 0 skipped tests.
-  Current source contains 111 specs; the Phase 1/2 additions await a user-run Studio rerun.
+  Current source contains 137 specs; the Phase 1-4 additions await a user-run Studio rerun.
 - A genuine one-server/two-client run completed elimination, authoritative Victory/Defeat
   Results, retained elimination across respawn, unanimous rematch consent, and a clean restart
   under a fresh match ID.
@@ -120,16 +125,16 @@ Current Development evidence (2026-07-15):
 - BotAim solves were observed at 3.43-5.65 ms. A Studio server snapshot measured 16.65 ms
   p50, 17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. These observations do not
   replace representative-device performance testing.
-- Schema-v1 profile validation/migration/derived-level rules, session lease/state rules, and
+- Schema-v2 profile validation/migration/derived-level/inventory/settings rules, session lease/state rules, and
   retained-ledger idempotent result reward rules are implemented in source. The profile panel and Results
   reward feedback also exist, but their Studio service/UI integration is not yet accepted.
 - Unpublished Studio deliberately uses process-local session memory and provides no
   cross-session durability. Native DataStore persistence has not been tested in a published
   Development place.
 
-Pending combined Phase 1/2 user acceptance:
+Pending combined Phase 1-4 user acceptance:
 
-1. Run Studio TestEZ from the current source and record all 111 specs passing before changing
+1. Run Studio TestEZ from the current source and record all 137 specs passing before changing
    the recorded runtime total.
 2. Exercise A/D cumulative movement, zero-budget stopping, grounded/two-jump limits, and a
    jump at the final second; confirm no jitter, extra jump, match reset, or premature turn.
@@ -154,6 +159,18 @@ Pending combined Phase 1/2 user acceptance:
     read-only behavior, autosave, PlayerRemoving, and BindToClose before accepting persistence.
     Use an authenticated positive-UserId client and require `CLOUD`/`Persistent`; synthetic
     Studio users remain on SessionMemory and are not cloud evidence.
+11. Exercise Practice, Casual FIFO human pairing, Casual bot fill, cancel near deadline,
+    spectator isolation, Return to Camp, and exact-roster rematch with one and two clients.
+12. Verify the starter scarf preview/equip/respawn path and confirm its parts do not affect
+    collision, movement, aim origin, health, or knockback.
+13. Change reduced effects, camera shake, and UI scale; confirm immediate local response,
+    authoritative reconciliation, same-session persistence, and panel closure during a match.
+14. Complete a turn with touch emulation and gamepad, checking safe areas, control overlap,
+    focus navigation, left-stick movement, jump, right-stick aim/power, weapon cycling, and fire.
+15. Request/join during an active projectile and confirm at most one caught-up presentation,
+    no duplicate impact, and no client outcome authority.
+16. Reconcile Development telemetry counts/event order for a scripted queue-match-shot-impact-
+    result-rematch/settings/cosmetic session; verify no raw UserId or hostile payload appears.
 
 Repeat with player leaving:
 
@@ -187,7 +204,8 @@ Repeat with player leaving:
 - Core state is not communicated by color alone.
 - Timer, health, wind, weapon, aim, and Fire are legible at representative phone scale.
 - No hover-only action; controls do not overlap system safe areas.
-- Camera shake, music/SFX, and reduced effects apply immediately and persist.
+- Camera shake, reduced effects, and UI scale apply immediately and persist. Music/SFX values
+  persist as reserved settings, but playback is not accepted until original audio ships.
 - Effects do not cause full-screen flash or obscure projectile/character for an extended period.
 
 ## Security/adversarial tests
@@ -211,7 +229,7 @@ Pass means no unauthorized mutation, bounded server work, expected counter/diagn
 | Case | Expected |
 | --- | --- |
 | unpublished Studio stop/start | process-local SessionMemory may reset; never count this as cloud-persistence evidence |
-| normal leave/rejoin | current schema coins, XP, statistics, and processed grants restored; equipment applies after its migration ships |
+| normal leave/rejoin | current schema coins, XP, statistics, processed grants, starter ownership/equipment, and settings restored |
 | transient load/save failure | bounded retry; clear safe state; no default overwrite |
 | concurrent server join | one writable lease; other session waits/fails safely |
 | orderly server shutdown after queued result | bounded drain commits once or exposes a safe failure; no duplicate |

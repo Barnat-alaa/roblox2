@@ -15,6 +15,7 @@ local ArenaService = require(script.Parent.ArenaService)
 local CharacterService = require(script.Parent.CharacterService)
 local EconomyService = require(script.Parent.EconomyService)
 local NetworkService = require(script.Parent.NetworkService)
+local TelemetryService = require(script.Parent.TelemetryService)
 local TerrainService = require(script.Parent.TerrainService)
 
 type Remotes = NetworkService.Remotes
@@ -37,6 +38,7 @@ type ParticipantRecord = {
 	isNpc: boolean,
 	eliminated: boolean,
 	abandoned: boolean,
+	returnedToLobby: boolean,
 	legalTurnsCompleted: number,
 	player: Player?,
 	model: Model?,
@@ -79,9 +81,18 @@ export type BotTurnContext = {
 
 type BotTurnHandler = (context: BotTurnContext) -> ()
 
+export type LifecycleKind = "MatchStarted" | "ReturnedToLobby"
+
+export type LifecycleSnapshot = {
+	kind: LifecycleKind,
+	matchId: string,
+	humanPlayers: { Player },
+}
+
+export type LifecycleHandler = (snapshot: LifecycleSnapshot) -> ()
+
 local MATCH_SEED = 2_026_071_3
 local MAX_HUMAN_PARTICIPANTS = 2
-local INITIAL_MATCH_DELAY_SECONDS = 1
 local COUNTDOWN_SECONDS = 1.5
 local TURN_START_SECONDS = 0.65
 local TURN_END_SECONDS = 0.55
@@ -116,22 +127,21 @@ local lastRematchRequestAt: { [Player]: number } = {}
 local departingUserIds: { [number]: boolean } = {}
 local humanDeathConnections: { [Player]: RBXScriptConnection? } = {}
 local targetDeathConnection: RBXScriptConnection? = nil
-local waitingStartScheduled = false
 local restartInProgress = false
 local pendingResolutionReason: string? = nil
 local lastMatchEventTime = 0
 local resultEmissionCount = 0
 local rematchRestartCount = 0
 local botTurnHandler: BotTurnHandler? = nil
+local lifecycleHandler: LifecycleHandler? = nil
 local characterReadyDeadline = 0
 local started = false
 
 local beginNextTurn: () -> ()
 local enterWaitingState: () -> ()
 local eliminateParticipant: (participant: ParticipantRecord, reason: string, expectedMatchId: string) -> ()
-local scheduleMatchIfNeeded: () -> ()
 local startMatch: (humanPlayers: { Player }, resetWorld: boolean, suppliedMatchId: string?) -> ()
-local startMatchSafely: (humanPlayers: { Player }, resetWorld: boolean, suppliedMatchId: string?) -> ()
+local startMatchSafely: (humanPlayers: { Player }, resetWorld: boolean, suppliedMatchId: string?) -> boolean
 
 local function nextMatchEventTime(): number
 	local current = Workspace:GetServerTimeNow()
@@ -163,6 +173,33 @@ local function setDiagnostics()
 	Workspace:SetAttribute("CritterClashEliminatedCount", eliminatedCount)
 	Workspace:SetAttribute("CritterClashResultEmissionCount", resultEmissionCount)
 	Workspace:SetAttribute("CritterClashRematchRestartCount", rematchRestartCount)
+end
+
+local function emitLifecycle(kind: LifecycleKind, matchId: string, humanPlayers: { Player })
+	local handler = lifecycleHandler
+	if not handler then
+		return
+	end
+
+	local roster = table.create(#humanPlayers)
+	for _, player in humanPlayers do
+		table.insert(roster, player)
+	end
+	local snapshot = table.freeze({
+		kind = kind,
+		matchId = matchId,
+		humanPlayers = table.freeze(roster),
+	}) :: LifecycleSnapshot
+	local problem: any = nil
+	local succeeded = xpcall(function()
+		handler(snapshot)
+	end, function(message: any): any
+		problem = message
+		return message
+	end)
+	if not succeeded then
+		warn(string.format("[CritterClash] Match lifecycle handler failed: %s", tostring(problem)))
+	end
 end
 
 local function statePayload()
@@ -229,6 +266,7 @@ local function connectedByUserId(): { [number]: boolean }
 		local player = participant.player
 		if
 			not participant.isNpc
+			and not participant.returnedToLobby
 			and player ~= nil
 			and player.Parent == Players
 			and not departingUserIds[player.UserId]
@@ -256,6 +294,15 @@ local function resultParticipants(): { ResultParticipant }
 		}
 	end
 	return result
+end
+
+local function includesNpcParticipant(): boolean
+	for _, participant in participants do
+		if participant.isNpc then
+			return true
+		end
+	end
+	return false
 end
 
 local function completionSnapshot(
@@ -381,6 +428,11 @@ local function enterResults(outcome: Outcome, reasonOverride: string?)
 	-- profile work. Repeated death/disconnect callbacks can no longer enqueue a
 	-- second logical reward for the same match.
 	resultPayload = payload
+	TelemetryService.emit("match_completed", {
+		reason = finalReason,
+		versusBot = includesNpcParticipant(),
+		durationSeconds = math.clamp(completedAt - matchStartedAt, 0, 7_200),
+	})
 	local completion = completionSnapshot(outcome, finalReason, completedAt)
 	local rewardsQueued, queuedRewards = pcall(EconomyService.enqueueMatchCompletion, completion)
 	if rewardsQueued then
@@ -885,6 +937,7 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 			isNpc = false,
 			eliminated = false,
 			abandoned = false,
+			returnedToLobby = false,
 			legalTurnsCompleted = 0,
 			player = player,
 			model = nil,
@@ -900,6 +953,7 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 			isNpc = true,
 			eliminated = false,
 			abandoned = false,
+			returnedToLobby = false,
 			legalTurnsCompleted = 0,
 			player = nil,
 			model = target,
@@ -922,6 +976,14 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 	deadline = Workspace:GetServerTimeNow() + COUNTDOWN_SECONDS
 	CharacterService.setActivePlayer(nil)
 	broadcastState(nil)
+	emitLifecycle("MatchStarted", currentMatchId, humans)
+	if suppliedMatchId ~= nil then
+		TelemetryService.emit("match_started", {
+			mode = "Rematch",
+			versusBot = target ~= nil,
+			participantCount = #participants,
+		})
+	end
 	local token = transitionToken
 	task.delay(COUNTDOWN_SECONDS, function()
 		if isCurrentTransition(token, "Countdown") then
@@ -942,9 +1004,18 @@ startMatchSafely = function(humanPlayers: { Player }, resetWorld: boolean, suppl
 		warn(string.format("[CritterClash] Match setup failed: %s", startError))
 		enterWaitingState()
 	end
+	return succeeded
 end
 
 enterWaitingState = function()
+	local completedMatchId = currentMatchId
+	local completedHumans: { Player } = {}
+	for _, participant in participants do
+		local player = participant.player
+		if not participant.isNpc and player then
+			table.insert(completedHumans, player)
+		end
+	end
 	local shouldResetWorld = currentMatchId ~= ""
 	transitionToken += 1
 	clearDeathConnections()
@@ -992,56 +1063,23 @@ enterWaitingState = function()
 		end
 	end
 	broadcastState(nil)
-	task.defer(scheduleMatchIfNeeded)
-end
-
-scheduleMatchIfNeeded = function()
-	if phase ~= "WaitingForPlayers" or currentMatchId ~= "" or waitingStartScheduled then
-		return
-	end
-	if #Players:GetPlayers() == 0 then
-		return
-	end
-
-	waitingStartScheduled = true
-	task.delay(INITIAL_MATCH_DELAY_SECONDS, function()
-		waitingStartScheduled = false
-		if phase ~= "WaitingForPlayers" or currentMatchId ~= "" then
-			return
-		end
-		startMatchSafely(Players:GetPlayers(), false, nil)
-	end)
+	emitLifecycle("ReturnedToLobby", completedMatchId, completedHumans)
 end
 
 local function connectedCurrentHumans(): { Player }
 	local humans = {}
 	for _, participant in participants do
 		local player = participant.player
-		if not participant.isNpc and player and player.Parent == Players then
+		if
+			not participant.isNpc
+			and not participant.returnedToLobby
+			and player
+			and player.Parent == Players
+		then
 			table.insert(humans, player)
 		end
 	end
 	return sortedConnectedPlayers(humans)
-end
-
-local function nextMatchHumans(): { Player }
-	local humans = connectedCurrentHumans()
-	local included: { [Player]: boolean } = {}
-	for _, player in humans do
-		included[player] = true
-	end
-
-	local waitingPlayers = sortedConnectedPlayers(Players:GetPlayers())
-	for _, player in waitingPlayers do
-		if #humans >= MAX_HUMAN_PARTICIPANTS then
-			break
-		end
-		if not included[player] then
-			included[player] = true
-			table.insert(humans, player)
-		end
-	end
-	return humans
 end
 
 local function beginRematch()
@@ -1053,7 +1091,9 @@ local function beginRematch()
 		return
 	end
 
-	local humans = nextMatchHumans()
+	-- Rematches may only retain connected members of the completed human roster.
+	-- Spectators and queued players are admitted exclusively by LobbyService.
+	local humans = connectedCurrentHumans()
 	if #humans == 0 then
 		enterWaitingState()
 		return
@@ -1075,6 +1115,9 @@ local function beginRematch()
 		})
 	end
 	rematchRestartCount += 1
+	TelemetryService.emit("rematch_selected", {
+		versusBot = includesNpcParticipant(),
+	})
 	setDiagnostics()
 
 	task.defer(function()
@@ -1161,7 +1204,6 @@ local function observePlayer(player: Player)
 	departingUserIds[player.UserId] = nil
 	player.CharacterAdded:Connect(function(character)
 		watchHumanCharacter(player, character)
-		task.defer(scheduleMatchIfNeeded)
 	end)
 
 	local participant = participantByUserId[player.UserId]
@@ -1182,7 +1224,6 @@ local function observePlayer(player: Player)
 			currentRemotes.matchEvent:FireClient(player, "Result", currentResult)
 			broadcastRematchStatus(player)
 		end
-		scheduleMatchIfNeeded()
 	end)
 end
 
@@ -1228,8 +1269,6 @@ function MatchService.start(networkRemotes: Remotes, matchArena: Model)
 					broadcastRematchStatus(nil)
 					beginRematch()
 				end
-			else
-				scheduleMatchIfNeeded()
 			end
 		end)
 	end)
@@ -1237,9 +1276,7 @@ function MatchService.start(networkRemotes: Remotes, matchArena: Model)
 	task.spawn(function()
 		while true do
 			task.wait(0.2)
-			if phase == "WaitingForPlayers" then
-				scheduleMatchIfNeeded()
-			elseif
+			if
 				activeParticipant
 				and phase == "Aiming"
 				and Workspace:GetServerTimeNow() >= deadline
@@ -1250,6 +1287,106 @@ function MatchService.start(networkRemotes: Remotes, matchArena: Model)
 	end)
 
 	enterWaitingState()
+end
+
+-- LobbyService is the only normal caller of this admission boundary. The roster
+-- is validated without substitution: invalid, duplicate, or disconnected
+-- players never get silently replaced by server spectators.
+function MatchService.tryStartMatch(humanPlayers: { Player }): (boolean, string?)
+	if not started then
+		return false, "service_not_started"
+	end
+	if phase ~= "WaitingForPlayers" or currentMatchId ~= "" or restartInProgress then
+		return false, "match_busy"
+	end
+	if #humanPlayers < 1 or #humanPlayers > MAX_HUMAN_PARTICIPANTS then
+		return false, "invalid_roster"
+	end
+
+	local included: { [Player]: boolean } = {}
+	local includedUserIds: { [number]: boolean } = {}
+	local roster: { Player } = {}
+	for _, player in humanPlayers do
+		if
+			player.Parent ~= Players
+			or departingUserIds[player.UserId]
+			or included[player]
+			or includedUserIds[player.UserId]
+		then
+			return false, "invalid_roster"
+		end
+		included[player] = true
+		includedUserIds[player.UserId] = true
+		table.insert(roster, player)
+	end
+
+	if not startMatchSafely(roster, false, nil) then
+		return false, "setup_failed"
+	end
+	return true, nil
+end
+
+function MatchService.isAvailableForLobby(): boolean
+	return started
+		and phase == "WaitingForPlayers"
+		and currentMatchId == ""
+		and not restartInProgress
+end
+
+function MatchService.isPlayerInCurrentMatch(player: Player): boolean
+	if currentMatchId == "" then
+		return false
+	end
+	local participant = participantByUserId[player.UserId]
+	return participant ~= nil
+		and not participant.isNpc
+		and not participant.returnedToLobby
+		and participant.player == player
+end
+
+-- Results membership and rematch consent are separate from the immutable result
+-- payload. Opting out leaves rewards/results intact while excluding the player
+-- from the next roster.
+function MatchService.returnPlayerToLobby(player: Player): (boolean, string?)
+	if phase ~= "Results" or currentMatchId == "" then
+		return false, "not_in_results"
+	end
+	if restartInProgress then
+		return false, "rematch_starting"
+	end
+	local participant = participantByUserId[player.UserId]
+	if
+		not participant
+		or participant.isNpc
+		or participant.player ~= player
+		or player.Parent ~= Players
+	then
+		return false, "not_a_participant"
+	end
+	if participant.returnedToLobby then
+		return true, nil
+	end
+
+	participant.returnedToLobby = true
+	readyByUserId[player.UserId] = nil
+	CharacterService.setSpectator(player)
+	broadcastRematchStatus(nil)
+	if #requiredHumanUserIds() == 0 then
+		enterWaitingState()
+	else
+		beginRematch()
+	end
+	return true, nil
+end
+
+function MatchService.setLifecycleHandler(handler: LifecycleHandler)
+	assert(lifecycleHandler == nil, "match lifecycle handler may only be registered once")
+	lifecycleHandler = handler
+	if currentMatchId == "" then
+		emitLifecycle("ReturnedToLobby", "", {})
+	else
+		emitLifecycle("MatchStarted", currentMatchId, connectedCurrentHumans())
+	end
 end
 
 function MatchService.canFire(player: Player): (boolean, string?)

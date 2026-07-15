@@ -11,7 +11,7 @@ relationship with another game are prohibited.
 ## Current development slice
 
 The repository contains the server-authoritative combat, terrain, complete 1v1 match loop,
-and first progression foundation:
+progression foundation, and the Phase 3/4 lobby and comfort slice:
 
 - deterministic shared ballistics, wind, weapon, and damage rules;
 - a server-owned turn/fire boundary with request validation;
@@ -22,9 +22,11 @@ and first progression foundation:
   clips at the grid boundary and protected terrain;
 - protected spawn supports and bottom cells, a small server-lethal central hazard, and
   server-enforced death-height elimination;
-- a frozen 1v1 roster, with late joiners held as spectators for the active match and eligible
-  to fill an open slot at the next boundary, plus a server-owned BotCritter that uses bounded,
-  imperfect aim and the normal authoritative turn/fire path for solo matches;
+- an explicit same-server lobby admission boundary: Practice starts a bot match when the arena
+  is free, Casual pairs two FIFO entrants and bot-fills after eight seconds, cancellation is
+  idempotent, and queued players/spectators are never silently inserted into an active match;
+- a frozen 1v1 roster, with late joiners held as spectators, plus a server-owned BotCritter
+  that uses bounded, imperfect aim and the normal authoritative turn/fire path for solo play;
 - server-authoritative A/D movement and jumping with turn tokens, sequence validation,
   cumulative distance, speed, ground-state, jump-count, plane, and arena enforcement;
 - explicit logical support detection plus bounded consecutive-sample settling and recovery for
@@ -34,9 +36,9 @@ and first progression foundation:
 - persistent elimination state that remains authoritative across Roblox character respawns;
 - one authoritative match result, a Results interface, unanimous human rematch consent, and
   a fresh-match reset of terrain, bot, characters, wind, turns, and timers;
-- a strict schema-v1 profile containing bounded integer coins, XP, match statistics, and a
-  64-entry processed-reward ledger, including safe schema-v0 migration and server-derived
-  account levels;
+- a strict schema-v2 profile containing bounded integer coins, XP, match statistics, a
+  64-entry processed-reward ledger, cosmetic inventory/equipment, and normalized settings;
+  schema-v0 and schema-v1 profiles migrate safely while account level remains server-derived;
 - a Development-only persistence adapter with UpdateAsync session leases, bounded retries,
   autosave, shutdown draining, and explicit read-only/unavailable states; unpublished Studio
   uses an explicit process-local session-memory adapter and therefore does not persist across
@@ -45,28 +47,40 @@ and first progression foundation:
   identities, plus replicated profile status, balances, levels, and reward feedback in the
   HUD and Results interface; the 64-entry ledger covers reachable live retries, not arbitrary
   replay after an identity has been evicted;
+- one free original code-built `Sunset Scout Scarf`, validated owned/equipped state, a Loadout
+  preview, and a nonphysical character appearance that never changes combat statistics;
+- a responsive field-camp lobby with Practice, Casual, Loadout, Settings, queue status/cancel,
+  Results-to-lobby flow, and server-replicated lobby state;
+- persisted reduced-effects, camera-shake, and interface-scale settings that apply immediately,
+  plus touch sizing and keyboard/gamepad bindings for movement, jump, aim, weapon cycling, and
+  fire; representative hardware acceptance is still pending;
+- a rate-limited active-projectile snapshot request so a late client can recover the current
+  launch presentation without gaining collision or damage authority;
+- versioned, allowlisted Development telemetry for session, queue, match, rematch, shot,
+  impact, cosmetic, and settings events, emitted as structured diagnostics without raw user
+  identifiers or per-frame traffic;
 - a side-view client camera, aim controls, trajectory preview, and combat HUD;
 - an original code-built red-squirrel rival, layered hill/cloud/sun backdrop, and restrained
   atmosphere, bloom, and colour grading as the first low-cost visual-direction pass;
 - bounded client fluidity work: no 97-point trajectory allocation, at most 48 preview
   raycasts per rebuild, 16 effect catch-up steps per frame, a 10 Hz HUD cadence, and one
   terrain chunk rebuild per Heartbeat;
-- 111 TestEZ specs in source, lint/format configuration, and reproducible Rojo builds;
+- 137 TestEZ specs in source, lint/format configuration, and reproducible Rojo builds;
 - a CI workflow with pinned tooling, build validation, and a basic secret scan.
 
-Static analysis, strict analysis, and both Rojo builds are clean. The latest recorded Studio
-TestEZ run reports **56 passed, 0 failed, 0 skipped**; source now contains 111 specs, so the
-Phase 1 and Phase 2 additions still need a user-run Studio rerun. A live pre-Phase-1 bot match
-verified authoritative bot firing, human elimination, and the DEFEAT Results flow. Final bot
-rematch plus movement/support/runtime-feel validation remain user-run acceptance work. In Studio, bot
-aim solving was observed at 3.43-5.65 ms, while a server snapshot measured 16.65 ms p50,
-17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. These are development observations,
-not production or representative-device guarantees. Phase 2 persistence and reward code has
-not yet been validated against Roblox cloud DataStoreService: that requires an owner-run,
-published Development-place test. The immediate milestone is combined Phase 1/2 Studio
-acceptance; the next code milestone is a compact lobby and one free original cosmetic.
+The source contains 137 TestEZ specs. The latest recorded Studio TestEZ run still reports
+**56 passed, 0 failed, 0 skipped**, so the new Phase 1-4 specs and runtime paths require an
+owner/user-run Studio rerun; source count is not runtime evidence. A live earlier bot match
+verified authoritative bot firing, human elimination, and the DEFEAT Results flow. Lobby,
+loadout, settings, late-projectile recovery, gamepad/mobile feel, and the final bot/rematch
+pass remain runtime acceptance work. Earlier Studio observations measured BotAim solving at
+3.43-5.65 ms and a server snapshot at 16.65 ms p50, 17.72 ms p95, 18.04 ms p99, and 18.37 ms
+worst frame time. These pre-Phase-3 observations are not production or representative-device
+guarantees. Schema-v2 persistence has not been validated against Roblox cloud
+DataStoreService; that requires an owner-run published Development-place test with an
+authenticated positive UserId.
 
-The current Development build identifies itself as `0.5.0-dev`. Character and environment
+The current Development build identifies itself as `0.7.0-dev`. Character and environment
 art remain editable programmer-art foundations; screenshot feedback will drive the next
 silhouette, palette, scale, and readability pass before any production asset work.
 
@@ -121,8 +135,12 @@ DataModel inspection and playtesting; Rojo remains the source-of-truth for code.
 - `Left` / `Right`: adjust shot power.
 - `1`–`4`: select an MVP weapon.
 - `F`: request a shot.
+- Gamepad: left stick moves, `A` jumps, right stick adjusts aim/power, bumpers cycle weapons,
+  and right trigger fires.
+- Lobby keyboard shortcuts: `P` Practice, `C` Casual, `L` Loadout, and `S` Settings.
 
-Mobile-safe controls are rendered by the client, but real-device tuning is still pending.
+Mobile-safe controls and responsive panels are rendered by the client, but phone/tablet and
+physical-gamepad tuning remain owner-run acceptance work.
 
 ## Repository policy
 

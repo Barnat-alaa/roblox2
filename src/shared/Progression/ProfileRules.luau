@@ -1,6 +1,8 @@
 --!strict
 
 local EconomyConfig = require(script.Parent.Parent.Config.EconomyConfig)
+local CosmeticRules = require(script.Parent.CosmeticRules)
+local SettingsRules = require(script.Parent.SettingsRules)
 
 local ProfileRules = {}
 
@@ -30,6 +32,8 @@ export type Profile = {
 	xp: number,
 	stats: MatchStats,
 	processedRewards: { ProcessedReward },
+	inventory: CosmeticRules.CosmeticInventory,
+	settings: SettingsRules.Settings,
 }
 
 export type LegacyProfileV0 = {
@@ -39,11 +43,31 @@ export type LegacyProfileV0 = {
 	experience: number?,
 }
 
-local CURRENT_SCHEMA_VERSION = 1
+export type LegacyProfileV1 = {
+	schemaVersion: number,
+	economyVersion: number,
+	coins: number,
+	xp: number,
+	stats: MatchStats,
+	processedRewards: { ProcessedReward },
+}
+
+local CURRENT_SCHEMA_VERSION = 2
 local MAX_SAFE_INTEGER = 9_007_199_254_740_991
 local MAX_REWARD_KEY_LENGTH = 256
 
 local PROFILE_FIELDS = table.freeze({
+	schemaVersion = true,
+	economyVersion = true,
+	coins = true,
+	xp = true,
+	stats = true,
+	processedRewards = true,
+	inventory = true,
+	settings = true,
+})
+
+local LEGACY_V1_FIELDS = table.freeze({
 	schemaVersion = true,
 	economyVersion = true,
 	coins = true,
@@ -68,7 +92,7 @@ local REWARD_FIELDS = table.freeze({
 	mode = true,
 })
 
-local LEGACY_FIELDS = table.freeze({
+local LEGACY_V0_FIELDS = table.freeze({
 	schemaVersion = true,
 	coins = true,
 	xp = true,
@@ -242,6 +266,8 @@ function ProfileRules.createDefault(): Profile
 			draws = 0,
 		},
 		processedRewards = {},
+		inventory = CosmeticRules.createDefault(),
+		settings = SettingsRules.createDefault(),
 	}
 end
 
@@ -262,6 +288,8 @@ function ProfileRules.clone(profile: Profile): Profile
 			draws = profile.stats.draws,
 		},
 		processedRewards = rewards,
+		inventory = CosmeticRules.clone(profile.inventory),
+		settings = SettingsRules.clone(profile.settings),
 	}
 end
 
@@ -294,11 +322,19 @@ function ProfileRules.validate(value: unknown): (boolean, string?)
 	if not ledgerValid then
 		return false, ledgerReason
 	end
+	local inventoryValid, inventoryReason = CosmeticRules.validate(profile.inventory)
+	if not inventoryValid then
+		return false, inventoryReason
+	end
+	local settingsValid, settingsReason = SettingsRules.validate(profile.settings)
+	if not settingsValid then
+		return false, settingsReason
+	end
 	return true, nil
 end
 
 local function migrateLegacyV0(value: { [any]: any }): (Profile?, string?)
-	local fieldsValid = onlyHasFields(value, LEGACY_FIELDS)
+	local fieldsValid = onlyHasFields(value, LEGACY_V0_FIELDS)
 	if not fieldsValid then
 		return nil, "invalid_legacy_fields"
 	end
@@ -322,6 +358,46 @@ local function migrateLegacyV0(value: { [any]: any }): (Profile?, string?)
 	return migrated, nil
 end
 
+local function migrateLegacyV1(value: { [any]: any }): (Profile?, string?)
+	local fieldsValid = onlyHasFields(value, LEGACY_V1_FIELDS)
+	if not fieldsValid then
+		return nil, "invalid_legacy_v1_fields"
+	end
+	if not isIntegerInRange(value.economyVersion, 1, MAX_SAFE_INTEGER) then
+		return nil, "invalid_economy_version"
+	end
+	if not isIntegerInRange(value.coins, 0, EconomyConfig.maxCoins) then
+		return nil, "invalid_coins"
+	end
+	if not isIntegerInRange(value.xp, 0, EconomyConfig.maxXp) then
+		return nil, "invalid_xp"
+	end
+	local statsValid, statsReason = validateStats(value.stats)
+	if not statsValid then
+		return nil, statsReason
+	end
+	local ledgerValid, ledgerReason = validateRewardLedger(value.processedRewards)
+	if not ledgerValid then
+		return nil, ledgerReason
+	end
+
+	local migrated = ProfileRules.createDefault()
+	migrated.economyVersion = value.economyVersion :: number
+	migrated.coins = value.coins :: number
+	migrated.xp = value.xp :: number
+	local stats = value.stats :: MatchStats
+	migrated.stats = {
+		matchesPlayed = stats.matchesPlayed,
+		wins = stats.wins,
+		losses = stats.losses,
+		draws = stats.draws,
+	}
+	for _, entry in value.processedRewards :: { ProcessedReward } do
+		table.insert(migrated.processedRewards, cloneReward(entry))
+	end
+	return migrated, nil
+end
+
 function ProfileRules.migrate(value: unknown): (Profile?, string?)
 	if value == nil then
 		return ProfileRules.createDefault(), nil
@@ -339,6 +415,9 @@ function ProfileRules.migrate(value: unknown): (Profile?, string?)
 	end
 	if raw.schemaVersion == 0 then
 		return migrateLegacyV0(raw)
+	end
+	if raw.schemaVersion == 1 then
+		return migrateLegacyV1(raw)
 	end
 	if type(raw.schemaVersion) == "number" and raw.schemaVersion > CURRENT_SCHEMA_VERSION then
 		return nil, "future_schema"

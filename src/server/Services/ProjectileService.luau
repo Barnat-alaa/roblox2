@@ -14,6 +14,7 @@ local CharacterService = require(script.Parent.CharacterService)
 local DamageService = require(script.Parent.DamageService)
 local MatchService = require(script.Parent.MatchService)
 local NetworkService = require(script.Parent.NetworkService)
+local TelemetryService = require(script.Parent.TelemetryService)
 local TerrainService = require(script.Parent.TerrainService)
 
 type Remotes = NetworkService.Remotes
@@ -30,11 +31,24 @@ export type ShotIntent = {
 
 type BeginProjectile = () -> (boolean, string?, ProjectileLease?)
 
+type ShotLaunchPayload = {
+	shotId: string,
+	shooterUserId: number,
+	weaponId: string,
+	origin: Vector3,
+	velocity: Vector3,
+	acceleration: Vector3,
+	serverTime: number,
+	seed: number,
+}
+
 local ProjectileService = {}
 
 local shotSequence = 0
 local lastRequestAt: { [Player]: number } = {}
+local lastSnapshotRequestAt: { [Player]: number } = {}
 local activeRemotes: Remotes? = nil
+local activeLaunch: ShotLaunchPayload? = nil
 local started = false
 
 local function isFinite(value: number): boolean
@@ -114,6 +128,9 @@ local function simulateShot(
 			return
 		end
 		finished = true
+		if activeLaunch and activeLaunch.shotId == shotId then
+			activeLaunch = nil
+		end
 		if connection then
 			connection:Disconnect()
 			connection = nil
@@ -175,6 +192,10 @@ local function simulateShot(
 				terrainCellsChanged = terrainCellsChanged,
 				terrainRevision = TerrainService.getRevision(),
 			})
+			TelemetryService.emit("projectile_impacted", {
+				weaponId = definition.id,
+				terrainCellsChanged = terrainCellsChanged,
+			})
 		end, function(problem: any): any
 			impactError = problem
 			return problem
@@ -188,7 +209,7 @@ local function simulateShot(
 		MatchService.finishProjectile(lease)
 	end
 
-	remotes.combatEvent:FireAllClients("ProjectileLaunched", {
+	local launchPayload: ShotLaunchPayload = {
 		shotId = shotId,
 		shooterUserId = actorUserId,
 		weaponId = definition.id,
@@ -197,6 +218,12 @@ local function simulateShot(
 		acceleration = acceleration,
 		serverTime = Workspace:GetServerTimeNow(),
 		seed = seed,
+	}
+	activeLaunch = launchPayload
+	remotes.combatEvent:FireAllClients("ProjectileLaunched", launchPayload)
+	TelemetryService.emit("shot_fired", {
+		weaponId = definition.id,
+		actor = if source.player then "Player" else "Bot",
 	})
 
 	connection = RunService.Heartbeat:Connect(function(deltaTime)
@@ -350,6 +377,9 @@ local function launchAuthoritativeShot(
 				tostring(launchError)
 			)
 		)
+		if activeLaunch and activeLaunch.shotId == shotId then
+			activeLaunch = nil
+		end
 		MatchService.finishProjectile(lease)
 		return false, "server_simulation_error"
 	end
@@ -408,9 +438,22 @@ function ProjectileService.start(remotes: Remotes)
 	remotes.requestFire.OnServerEvent:Connect(function(player, request)
 		onFireRequested(remotes, player, request)
 	end)
+	remotes.requestCombatSnapshot.OnServerEvent:Connect(function(player)
+		local now = os.clock()
+		local previous = lastSnapshotRequestAt[player]
+		if previous and now - previous < 1 then
+			return
+		end
+		lastSnapshotRequestAt[player] = now
+		local launch = activeLaunch
+		if launch then
+			remotes.combatEvent:FireClient(player, "ProjectileLaunched", launch)
+		end
+	end)
 
 	Players.PlayerRemoving:Connect(function(player)
 		lastRequestAt[player] = nil
+		lastSnapshotRequestAt[player] = nil
 	end)
 end
 

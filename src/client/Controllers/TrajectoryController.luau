@@ -9,6 +9,7 @@ local Ballistics = require(ReplicatedStorage.Shared.Simulation.Ballistics)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
 local Wind = require(ReplicatedStorage.Shared.Simulation.Wind)
+local ClientSettings = require(script.Parent.ClientSettings)
 
 local DOT_COUNT = 24
 local SAMPLE_INTERVAL = 4 / 15
@@ -85,6 +86,7 @@ function TrajectoryController.create(initialIntent: Intent): Controller
 	local destroyed = false
 	local elapsedSinceMovementCheck = REFRESH_INTERVAL
 	local lastOrigin: Vector3? = nil
+	local reducedEffects = ClientSettings.readLocal(Players.LocalPlayer).reducedEffects
 
 	local function hideAll()
 		for _, dot in dots do
@@ -128,7 +130,8 @@ function TrajectoryController.create(initialIntent: Intent): Controller
 		local visibleDotCount = 0
 		local previousPoint = origin
 		local stopped = false
-		for dotIndex = 1, DOT_COUNT do
+		local maximumDots = if reducedEffects then math.ceil(DOT_COUNT / 2) else DOT_COUNT
+		for dotIndex = 1, maximumDots do
 			local dot = dots[dotIndex]
 			for substepIndex = 1, COLLISION_SUBSTEPS_PER_DOT do
 				local elapsed = (dotIndex - 1) * SAMPLE_INTERVAL + substepIndex * COLLISION_INTERVAL
@@ -177,6 +180,12 @@ function TrajectoryController.create(initialIntent: Intent): Controller
 			rebuild()
 		end
 	end)
+	local settingsConnection = Players.LocalPlayer
+		:GetAttributeChangedSignal("ClientReducedEffects")
+		:Connect(function()
+			reducedEffects = ClientSettings.readLocal(Players.LocalPlayer).reducedEffects
+			dirty = true
+		end)
 
 	local controller: Controller = {
 		setIntent = function(nextIntent: Intent)
@@ -205,6 +214,7 @@ function TrajectoryController.create(initialIntent: Intent): Controller
 			end
 			destroyed = true
 			heartbeatConnection:Disconnect()
+			settingsConnection:Disconnect()
 			folder:Destroy()
 		end,
 	}

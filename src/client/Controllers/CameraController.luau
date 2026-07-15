@@ -7,6 +7,7 @@ local Workspace = game:GetService("Workspace")
 
 local BotConfig = require(ReplicatedStorage.Shared.Config.BotConfig)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
+local ClientSettings = require(script.Parent.ClientSettings)
 
 local OVERVIEW_TARGET = Vector3.new(0, 15, GameConfig.combatPlaneZ)
 local OVERVIEW_DISTANCE = 155
@@ -17,6 +18,8 @@ local IMPACT_DISTANCE = 82
 local CAMERA_HEIGHT = 8
 local CAMERA_SMOOTHNESS = 8
 local IMPACT_HOLD_SECONDS = 1.1
+local SHAKE_DURATION_SECONDS = 0.5
+local MAX_SHAKE_STUDS = 1.75
 
 type CameraMode = "Overview" | "Actor" | "Projectile" | "Impact"
 
@@ -85,6 +88,9 @@ function CameraController.create(): Controller
 	local projectileWide = false
 	local impactPosition: Vector3? = nil
 	local impactExpiresAt = 0
+	local impactStartedAt = 0
+	local shakePhase = 0
+	local cameraShake = ClientSettings.readLocal(Players.LocalPlayer).cameraShake
 	local destroyed = false
 
 	local camera = Workspace.CurrentCamera
@@ -139,11 +145,27 @@ function CameraController.create(): Controller
 		end
 
 		target = Vector3.new(target.X, target.Y + CAMERA_HEIGHT, GameConfig.combatPlaneZ)
+		if mode == "Impact" and cameraShake > 0 then
+			local elapsed = math.max(0, Workspace:GetServerTimeNow() - impactStartedAt)
+			local decay = math.max(0, 1 - elapsed / SHAKE_DURATION_SECONDS)
+			local amplitude = MAX_SHAKE_STUDS * cameraShake * decay * decay
+			target += Vector3.new(
+				math.sin(elapsed * 43 + shakePhase) * amplitude,
+				math.cos(elapsed * 51 + shakePhase * 0.7) * amplitude * 0.65,
+				0
+			)
+		end
 		local desired = CFrame.lookAt(target + Vector3.new(0, 0, distance), target)
 		local alpha = 1 - math.exp(-CAMERA_SMOOTHNESS * deltaTime)
 		currentCamera.CFrame = currentCamera.CFrame:Lerp(desired, alpha)
 		currentCamera.Focus = CFrame.new(target)
 	end)
+
+	local settingsConnection = Players.LocalPlayer
+		:GetAttributeChangedSignal("ClientCameraShake")
+		:Connect(function()
+			cameraShake = ClientSettings.readLocal(Players.LocalPlayer).cameraShake
+		end)
 
 	local controller: Controller = {
 		setActiveUserId = function(userId: number)
@@ -166,7 +188,13 @@ function CameraController.create(): Controller
 			followedShotId = shotId
 			followedProjectile = nil
 			impactPosition = position
-			impactExpiresAt = Workspace:GetServerTimeNow() + IMPACT_HOLD_SECONDS
+			impactStartedAt = Workspace:GetServerTimeNow()
+			impactExpiresAt = impactStartedAt + IMPACT_HOLD_SECONDS
+			local phaseAccumulator = 0
+			for index = 1, #shotId do
+				phaseAccumulator = (phaseAccumulator + string.byte(shotId, index) * index) % 6_283
+			end
+			shakePhase = phaseAccumulator / 1_000
 			mode = "Impact"
 		end,
 		stopFollowing = function(shotId: string)
@@ -180,6 +208,7 @@ function CameraController.create(): Controller
 			end
 			destroyed = true
 			renderConnection:Disconnect()
+			settingsConnection:Disconnect()
 			local currentCamera = Workspace.CurrentCamera
 			if currentCamera then
 				currentCamera.CameraType = Enum.CameraType.Custom

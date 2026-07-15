@@ -11,12 +11,13 @@ local Ballistics = require(ReplicatedStorage.Shared.Simulation.Ballistics)
 local BotConfig = require(ReplicatedStorage.Shared.Config.BotConfig)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
+local ClientSettings = require(script.Parent.ClientSettings)
 
 local WARM_CORAL = Color3.fromRGB(242, 107, 94)
 local GOLDEN = Color3.fromRGB(246, 196, 71)
 local MINT = Color3.fromRGB(118, 217, 177)
 local IMPACT_WHITE = Color3.fromRGB(255, 253, 246)
-local MAX_ACTIVE_SHOTS = 24
+local MAX_ACTIVE_SHOTS = 8
 local MAX_CATCHUP_STEPS_PER_FRAME = 16
 local FALLBACK_LIFETIME = 8
 
@@ -81,6 +82,7 @@ function EffectsController.create(): Controller
 	local recentImpacts: { [string]: number } = {}
 	local nextSequence = 0
 	local destroyed = false
+	local reducedEffects = ClientSettings.readLocal(Players.LocalPlayer).reducedEffects
 
 	local function removeShot(shotId: string)
 		local shot = activeShots[shotId]
@@ -261,8 +263,8 @@ function EffectsController.create(): Controller
 		trail.Attachment1 = backAttachment
 		trail.Color = ColorSequence.new(IMPACT_WHITE, MINT)
 		trail.FaceCamera = true
-		trail.Lifetime = 0.24
-		trail.LightEmission = 0.8
+		trail.Lifetime = if reducedEffects then 0.1 else 0.24
+		trail.LightEmission = if reducedEffects then 0.35 else 0.8
 		trail.MinLength = 0.05
 		trail.Transparency = NumberSequence.new({
 			NumberSequenceKeypoint.new(0, 0.05),
@@ -291,16 +293,20 @@ function EffectsController.create(): Controller
 		local definition = Weapons.get(impactData.weaponId)
 		local radius = if definition then definition.explosionRadius else 8
 
-		local flash = Instance.new("Part")
-		flash.Name = `ImpactFlash_{impactData.shotId}`
-		flash.Color = IMPACT_WHITE
-		flash.Material = Enum.Material.Neon
-		flash.Shape = Enum.PartType.Ball
-		flash.Size = Vector3.one * 0.8
-		flash.Position = impactData.position
-		flash.Transparency = 0.05
-		configureVisualPart(flash)
-		flash.Parent = folder
+		local flash: BasePart? = nil
+		if not reducedEffects then
+			local nextFlash = Instance.new("Part")
+			nextFlash.Name = `ImpactFlash_{impactData.shotId}`
+			nextFlash.Color = IMPACT_WHITE
+			nextFlash.Material = Enum.Material.Neon
+			nextFlash.Shape = Enum.PartType.Ball
+			nextFlash.Size = Vector3.one * 0.8
+			nextFlash.Position = impactData.position
+			nextFlash.Transparency = 0.05
+			configureVisualPart(nextFlash)
+			nextFlash.Parent = folder
+			flash = nextFlash
+		end
 
 		local core = Instance.new("Part")
 		core.Name = `ImpactCore_{impactData.shotId}`
@@ -313,25 +319,35 @@ function EffectsController.create(): Controller
 		configureVisualPart(core)
 		core.Parent = folder
 
-		local flashTween = TweenService:Create(
-			flash,
-			TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{
-				Size = Vector3.one * radius * 1.8,
-				Transparency = 1,
-			}
-		)
+		local flashTween = if flash
+			then TweenService:Create(
+				flash,
+				TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{
+					Size = Vector3.one * radius * 1.8,
+					Transparency = 1,
+				}
+			)
+			else nil
 		local coreTween = TweenService:Create(
 			core,
-			TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+			TweenInfo.new(
+				if reducedEffects then 0.32 else 0.6,
+				Enum.EasingStyle.Quart,
+				Enum.EasingDirection.Out
+			),
 			{
-				Size = Vector3.one * radius,
+				Size = Vector3.one * radius * (if reducedEffects then 0.55 else 1),
 				Transparency = 1,
 			}
 		)
-		flashTween:Play()
+		if flashTween then
+			flashTween:Play()
+		end
 		coreTween:Play()
-		Debris:AddItem(flash, 0.7)
+		if flash then
+			Debris:AddItem(flash, 0.7)
+		end
 		Debris:AddItem(core, 0.8)
 	end
 
@@ -347,6 +363,12 @@ function EffectsController.create(): Controller
 		end)
 	end
 
+	local settingsConnection = Players.LocalPlayer
+		:GetAttributeChangedSignal("ClientReducedEffects")
+		:Connect(function()
+			reducedEffects = ClientSettings.readLocal(Players.LocalPlayer).reducedEffects
+		end)
+
 	local controller: Controller = {
 		launch = launch,
 		impact = impact,
@@ -356,6 +378,7 @@ function EffectsController.create(): Controller
 			end
 			destroyed = true
 			renderConnection:Disconnect()
+			settingsConnection:Disconnect()
 			for shotId in activeShots do
 				removeShot(shotId)
 			end

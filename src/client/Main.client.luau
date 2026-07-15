@@ -10,9 +10,12 @@ local CameraController = require(script.Parent.Controllers.CameraController)
 local EffectsController = require(script.Parent.Controllers.EffectsController)
 local HUDController = require(script.Parent.Controllers.HUDController)
 local InputController = require(script.Parent.Controllers.InputController)
+local LoadoutController = require(script.Parent.Controllers.LoadoutController)
+local LobbyController = require(script.Parent.Controllers.LobbyController)
 local MovementController = require(script.Parent.Controllers.MovementController)
 local ProfileController = require(script.Parent.Controllers.ProfileController)
 local ResultsController = require(script.Parent.Controllers.ResultsController)
+local SettingsController = require(script.Parent.Controllers.SettingsController)
 local TerrainController = require(script.Parent.Controllers.TerrainController)
 local TrajectoryController = require(script.Parent.Controllers.TrajectoryController)
 
@@ -228,7 +231,15 @@ local requestTerrainSnapshotRemote =
 	waitForRemote(remotesFolder, RemoteNames.requestTerrainSnapshot)
 local matchEventRemote = waitForRemote(remotesFolder, RemoteNames.matchEvent)
 local requestRematchRemote = waitForRemote(remotesFolder, RemoteNames.requestRematch)
+local requestLobbyActionRemote = waitForRemote(remotesFolder, RemoteNames.requestLobbyAction)
+local lobbyEventRemote = waitForRemote(remotesFolder, RemoteNames.lobbyEvent)
+local requestEquipCosmeticRemote = waitForRemote(remotesFolder, RemoteNames.requestEquipCosmetic)
+local requestSettingsRemote = waitForRemote(remotesFolder, RemoteNames.requestSettings)
+local requestCombatSnapshotRemote = waitForRemote(remotesFolder, RemoteNames.requestCombatSnapshot)
 
+local settingsController = SettingsController.create(requestSettingsRemote, lobbyEventRemote)
+local lobbyController = LobbyController.create(requestLobbyActionRemote, lobbyEventRemote)
+local loadoutController = LoadoutController.create(requestEquipCosmeticRemote, lobbyEventRemote)
 local inputController = InputController.create()
 local movementController = MovementController.create(requestMovementRemote)
 local initialIntent: Intent = inputController.getIntent()
@@ -236,11 +247,32 @@ local cameraController = CameraController.create()
 local effectsController = EffectsController.create()
 local hudController = HUDController.create(initialIntent)
 local profileController = ProfileController.create()
-local resultsController = ResultsController.create(matchEventRemote, requestRematchRemote)
+local resultsController = ResultsController.create(
+	matchEventRemote,
+	requestRematchRemote,
+	requestLobbyActionRemote,
+	lobbyEventRemote
+)
 local terrainController = TerrainController.create(terrainEventRemote, requestTerrainSnapshotRemote)
 local trajectoryController = TrajectoryController.create(initialIntent)
 local connections: { RBXScriptConnection } = {}
 local destroyed = false
+
+table.insert(
+	connections,
+	lobbyController.openLoadoutRequested:Connect(function()
+		settingsController.setOpen(false)
+		loadoutController.setOpen(true)
+	end)
+)
+
+table.insert(
+	connections,
+	lobbyController.openSettingsRequested:Connect(function()
+		loadoutController.setOpen(false)
+		settingsController.setOpen(true)
+	end)
+)
 
 local function isLocalTurn(state: MatchState): boolean
 	if state.activeUserId ~= Players.LocalPlayer.UserId then
@@ -285,6 +317,11 @@ table.insert(
 		local localTurn = isLocalTurn(state)
 		local canFire = state.activeUserId == Players.LocalPlayer.UserId and state.phase == "Aiming"
 		local canMove = canFire
+		local lobbyMatchId = Players.LocalPlayer:GetAttribute("LobbyMatchId")
+		local locallyInMatch = Players.LocalPlayer:GetAttribute("LobbyState") == "InMatch"
+			and type(lobbyMatchId) == "string"
+			and lobbyMatchId == state.matchId
+		lobbyController.setMatchActive(locallyInMatch)
 		cameraController.setActiveUserId(state.activeUserId)
 		movementController.setTurn(state.matchId, state.turnToken, canMove)
 		inputController.setEnabled(canFire)
@@ -345,6 +382,9 @@ local function destroy()
 	end
 	profileController.destroy()
 	resultsController.destroy()
+	loadoutController.destroy()
+	lobbyController.destroy()
+	settingsController.destroy()
 	movementController.destroy()
 	terrainController.destroy()
 	trajectoryController.destroy()
@@ -355,3 +395,8 @@ local function destroy()
 end
 
 table.insert(connections, script.Destroying:Connect(destroy))
+
+-- Recover the one active projectile if this client finished loading after its
+-- launch broadcast. The server responds with the original timestamp, so the
+-- bounded local solver catches up without per-frame replication.
+requestCombatSnapshotRemote:FireServer()

@@ -2,11 +2,14 @@
 
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
+local ClientSettings = require(script.Parent.ClientSettings)
 
 local ACTION_AIM_UP = "CritterClashAimUp"
 local ACTION_AIM_DOWN = "CritterClashAimDown"
@@ -14,10 +17,15 @@ local ACTION_POWER_UP = "CritterClashPowerUp"
 local ACTION_POWER_DOWN = "CritterClashPowerDown"
 local ACTION_WEAPON = "CritterClashWeapon"
 local ACTION_FIRE = "CritterClashFire"
+local ACTION_GAMEPAD_AIM_POWER = "CritterClashGamepadAimPower"
 local ACTION_PRIORITY = 3_000
 
 local AIM_STEP = 2
 local POWER_STEP = 0.025
+local GAMEPAD_SAMPLE_SECONDS = 0.05
+local GAMEPAD_DEADZONE = 0.2
+local GAMEPAD_AIM_DEGREES_PER_SECOND = 45
+local GAMEPAD_POWER_PER_SECOND = 0.55
 
 local WEAPON_KEYS: { [Enum.KeyCode]: number } = {
 	[Enum.KeyCode.One] = 1,
@@ -106,6 +114,14 @@ local function cloneIntent(intent: Intent): Intent
 	}
 end
 
+local function facingFromSpawn(player: Player): number?
+	local spawnX = player:GetAttribute("MatchSpawnX")
+	if type(spawnX) ~= "number" or spawnX ~= spawnX or spawnX == 0 then
+		return nil
+	end
+	return if spawnX < 0 then 1 else -1
+end
+
 function InputController.create(): Controller
 	local localPlayer = Players.LocalPlayer
 	local playerGuiInstance = localPlayer:WaitForChild("PlayerGui")
@@ -117,11 +133,15 @@ function InputController.create(): Controller
 	local enabled = false
 	local fireLocked = false
 	local selectedWeaponIndex = 1
+	local gamepadAimAxis = 0
+	local gamepadPowerAxis = 0
+	local gamepadAccumulator = 0
 	local destroyed = false
 
 	local character = localPlayer.Character
 	local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
-	local facing = if root and root:IsA("BasePart") and root.Position.X > 0 then -1 else 1
+	local facing: number = facingFromSpawn(localPlayer)
+		or if root and root:IsA("BasePart") and root.Position.X > 0 then -1 else 1
 	local initialAngle = if facing == -1 then 135 else 45
 	local intent: Intent = {
 		angle = initialAngle,
@@ -134,7 +154,7 @@ function InputController.create(): Controller
 	screenGui.DisplayOrder = 20
 	screenGui.IgnoreGuiInset = false
 	screenGui.ResetOnSpawn = false
-	screenGui.Enabled = UserInputService.TouchEnabled
+	screenGui.Enabled = false
 	screenGui.Parent = playerGuiInstance
 
 	local controls = Instance.new("Frame")
@@ -142,60 +162,117 @@ function InputController.create(): Controller
 	controls.AnchorPoint = Vector2.new(1, 1)
 	controls.BackgroundTransparency = 1
 	controls.Position = UDim2.new(1, -14, 1, -18)
-	controls.Size = UDim2.fromOffset(280, 126)
+	controls.Size = UDim2.fromOffset(230, 112)
 	controls.Parent = screenGui
+
+	local accessibilityScale = Instance.new("UIScale")
+	accessibilityScale.Name = "AccessibilityScale"
+	accessibilityScale.Scale = ClientSettings.readLocal(localPlayer).uiScale
+	accessibilityScale.Parent = controls
 
 	local aimUpButton = createButton(
 		controls,
 		"AimUp",
 		"AIM +",
 		UDim2.fromOffset(0, 0),
-		UDim2.fromOffset(86, 54),
+		UDim2.fromOffset(70, 50),
 		DEEP_TEAL
 	)
 	local aimDownButton = createButton(
 		controls,
 		"AimDown",
 		"AIM -",
-		UDim2.fromOffset(0, 62),
-		UDim2.fromOffset(86, 54),
+		UDim2.fromOffset(0, 58),
+		UDim2.fromOffset(70, 50),
 		DEEP_TEAL
 	)
 	local powerUpButton = createButton(
 		controls,
 		"PowerUp",
 		"PWR +",
-		UDim2.fromOffset(96, 0),
-		UDim2.fromOffset(86, 54),
+		UDim2.fromOffset(78, 0),
+		UDim2.fromOffset(70, 50),
 		DEEP_TEAL
 	)
 	local powerDownButton = createButton(
 		controls,
 		"PowerDown",
 		"PWR -",
-		UDim2.fromOffset(96, 62),
-		UDim2.fromOffset(86, 54),
+		UDim2.fromOffset(78, 58),
+		UDim2.fromOffset(70, 50),
 		DEEP_TEAL
 	)
 	local weaponButton = createButton(
 		controls,
 		"Weapon",
 		"WPN 1",
-		UDim2.fromOffset(192, 0),
-		UDim2.fromOffset(86, 54),
+		UDim2.fromOffset(156, 0),
+		UDim2.fromOffset(70, 50),
 		DEEP_TEAL
 	)
 	local fireButton = createButton(
 		controls,
 		"Fire",
 		"FIRE",
-		UDim2.fromOffset(192, 62),
-		UDim2.fromOffset(86, 54),
+		UDim2.fromOffset(156, 58),
+		UDim2.fromOffset(70, 50),
 		WARM_CORAL
 	)
 
+	local function updateResponsiveLayout()
+		local camera = Workspace.CurrentCamera
+		local viewportWidth = if camera then camera.ViewportSize.X else 1_280
+		accessibilityScale.Scale = ClientSettings.readLocal(localPlayer).uiScale
+		if viewportWidth < 520 then
+			controls.Size = UDim2.fromOffset(150, 124)
+			for index, button in
+				{
+					aimUpButton,
+					aimDownButton,
+					powerUpButton,
+					powerDownButton,
+					weaponButton,
+					fireButton,
+				}
+			do
+				local column = (index - 1) % 2
+				local row = math.floor((index - 1) / 2)
+				button.Position = UDim2.fromOffset(column * 78, row * 43)
+				button.Size = UDim2.fromOffset(70, 36)
+			end
+		else
+			controls.Size = UDim2.fromOffset(230, 112)
+			for index, button in
+				{
+					aimUpButton,
+					aimDownButton,
+					powerUpButton,
+					powerDownButton,
+					weaponButton,
+					fireButton,
+				}
+			do
+				local column = math.floor((index - 1) / 2)
+				local row = (index - 1) % 2
+				button.Position = UDim2.fromOffset(column * 78, row * 58)
+				button.Size = UDim2.fromOffset(70, 50)
+			end
+		end
+	end
+
 	local function emitChanged(kind: ChangeKind)
 		changedEvent:Fire(cloneIntent(intent), kind)
+	end
+
+	local function syncFacing()
+		local nextFacing = facingFromSpawn(localPlayer)
+		if not nextFacing or nextFacing == facing then
+			return
+		end
+		local elevation = if facing == 1 then intent.angle else 180 - intent.angle
+		facing = nextFacing
+		intent.angle = if facing == 1 then elevation else 180 - elevation
+		emitChanged("Aim")
 	end
 
 	local function adjustAim(delta: number)
@@ -228,6 +305,11 @@ function InputController.create(): Controller
 		selectWeapon(nextIndex)
 	end
 
+	local function cycleWeaponBackward()
+		local nextIndex = ((selectedWeaponIndex - 2) % #Weapons.All) + 1
+		selectWeapon(nextIndex)
+	end
+
 	local function updateFireButton()
 		local ready = enabled and not fireLocked
 		fireButton.Active = ready
@@ -251,6 +333,9 @@ function InputController.create(): Controller
 			inputState: Enum.UserInputState,
 			_inputObject: InputObject
 		): Enum.ContextActionResult
+			if not enabled then
+				return Enum.ContextActionResult.Pass
+			end
 			if inputState == Enum.UserInputState.Begin then
 				callback()
 			end
@@ -265,7 +350,8 @@ function InputController.create(): Controller
 		end),
 		false,
 		ACTION_PRIORITY,
-		Enum.KeyCode.Up
+		Enum.KeyCode.Up,
+		Enum.KeyCode.DPadUp
 	)
 	ContextActionService:BindActionAtPriority(
 		ACTION_AIM_DOWN,
@@ -274,7 +360,8 @@ function InputController.create(): Controller
 		end),
 		false,
 		ACTION_PRIORITY,
-		Enum.KeyCode.Down
+		Enum.KeyCode.Down,
+		Enum.KeyCode.DPadDown
 	)
 	ContextActionService:BindActionAtPriority(
 		ACTION_POWER_UP,
@@ -302,10 +389,17 @@ function InputController.create(): Controller
 			inputState: Enum.UserInputState,
 			inputObject: InputObject
 		): Enum.ContextActionResult
+			if not enabled then
+				return Enum.ContextActionResult.Pass
+			end
 			if inputState == Enum.UserInputState.Begin then
 				local keyNumber = WEAPON_KEYS[inputObject.KeyCode]
 				if keyNumber then
 					selectWeapon(keyNumber)
+				elseif inputObject.KeyCode == Enum.KeyCode.ButtonL1 then
+					cycleWeaponBackward()
+				elseif inputObject.KeyCode == Enum.KeyCode.ButtonR1 then
+					cycleWeapon()
 				end
 			end
 			return Enum.ContextActionResult.Sink
@@ -315,14 +409,48 @@ function InputController.create(): Controller
 		Enum.KeyCode.One,
 		Enum.KeyCode.Two,
 		Enum.KeyCode.Three,
-		Enum.KeyCode.Four
+		Enum.KeyCode.Four,
+		Enum.KeyCode.ButtonL1,
+		Enum.KeyCode.ButtonR1
 	)
 	ContextActionService:BindActionAtPriority(
 		ACTION_FIRE,
 		actionOnBegin(requestFire),
 		false,
 		ACTION_PRIORITY,
-		Enum.KeyCode.F
+		Enum.KeyCode.F,
+		Enum.KeyCode.ButtonR2
+	)
+	ContextActionService:BindActionAtPriority(
+		ACTION_GAMEPAD_AIM_POWER,
+		function(
+			_actionName: string,
+			inputState: Enum.UserInputState,
+			inputObject: InputObject
+		): Enum.ContextActionResult
+			if not enabled then
+				gamepadAimAxis = 0
+				gamepadPowerAxis = 0
+				return Enum.ContextActionResult.Pass
+			end
+			if
+				inputState == Enum.UserInputState.End
+				or inputState == Enum.UserInputState.Cancel
+			then
+				gamepadAimAxis = 0
+				gamepadPowerAxis = 0
+			else
+				local position = inputObject.Position
+				gamepadAimAxis = if math.abs(position.Y) >= GAMEPAD_DEADZONE then position.Y else 0
+				gamepadPowerAxis = if math.abs(position.X) >= GAMEPAD_DEADZONE
+					then position.X
+					else 0
+			end
+			return Enum.ContextActionResult.Sink
+		end,
+		false,
+		ACTION_PRIORITY,
+		Enum.KeyCode.Thumbstick2
 	)
 
 	table.insert(
@@ -351,7 +479,49 @@ function InputController.create(): Controller
 	)
 	table.insert(connections, weaponButton.Activated:Connect(cycleWeapon))
 	table.insert(connections, fireButton.Activated:Connect(requestFire))
+	table.insert(
+		connections,
+		localPlayer:GetAttributeChangedSignal("ClientUIScale"):Connect(updateResponsiveLayout)
+	)
+	table.insert(
+		connections,
+		localPlayer:GetAttributeChangedSignal("MatchSpawnX"):Connect(syncFacing)
+	)
+	table.insert(
+		connections,
+		Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(updateResponsiveLayout)
+	)
+	local camera = Workspace.CurrentCamera
+	if camera then
+		table.insert(
+			connections,
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateResponsiveLayout)
+		)
+	end
 
+	local heartbeatConnection = RunService.Heartbeat:Connect(function(deltaTime)
+		if destroyed or not enabled then
+			return
+		end
+		if gamepadAimAxis == 0 and gamepadPowerAxis == 0 then
+			gamepadAccumulator = 0
+			return
+		end
+		gamepadAccumulator += deltaTime
+		if gamepadAccumulator < GAMEPAD_SAMPLE_SECONDS then
+			return
+		end
+		local sample = math.min(gamepadAccumulator, 0.1)
+		gamepadAccumulator = 0
+		if gamepadAimAxis ~= 0 then
+			adjustAim(gamepadAimAxis * GAMEPAD_AIM_DEGREES_PER_SECOND * sample)
+		end
+		if gamepadPowerAxis ~= 0 then
+			adjustPower(gamepadPowerAxis * GAMEPAD_POWER_PER_SECOND * sample)
+		end
+	end)
+
+	updateResponsiveLayout()
 	updateFireButton()
 
 	local controller: Controller = {
@@ -361,9 +531,16 @@ function InputController.create(): Controller
 			return cloneIntent(intent)
 		end,
 		setEnabled = function(nextEnabled: boolean)
+			if nextEnabled then
+				syncFacing()
+			end
 			enabled = nextEnabled
+			screenGui.Enabled = UserInputService.TouchEnabled and enabled
 			if not nextEnabled then
 				fireLocked = false
+				gamepadAimAxis = 0
+				gamepadPowerAxis = 0
+				gamepadAccumulator = 0
 			end
 			updateFireButton()
 		end,
@@ -379,6 +556,7 @@ function InputController.create(): Controller
 				return
 			end
 			destroyed = true
+			heartbeatConnection:Disconnect()
 
 			ContextActionService:UnbindAction(ACTION_AIM_UP)
 			ContextActionService:UnbindAction(ACTION_AIM_DOWN)
@@ -386,6 +564,7 @@ function InputController.create(): Controller
 			ContextActionService:UnbindAction(ACTION_POWER_DOWN)
 			ContextActionService:UnbindAction(ACTION_WEAPON)
 			ContextActionService:UnbindAction(ACTION_FIRE)
+			ContextActionService:UnbindAction(ACTION_GAMEPAD_AIM_POWER)
 			for _, connection in connections do
 				connection:Disconnect()
 			end

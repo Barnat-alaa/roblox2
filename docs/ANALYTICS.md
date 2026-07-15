@@ -17,12 +17,44 @@ Supporting questions:
 ## Principles
 
 - Server emits authoritative match, damage, reward, inventory, and purchase-grant facts.
-- Client emits only presentation interactions the server cannot observe, through a strict allowlisted analytics adapter.
+- The current slice has no client-authored analytics path. Future client-only presentation
+  interactions require a strict allowlisted server adapter before activation.
 - Use stable snake_case event names, integer schema version, and documented enumerations.
 - Never send passwords, tokens, email, chat, display names, raw hostile payloads, or unnecessary personal data.
 - Do not emit per-frame position, aim, trajectory, camera, or input events.
 - Separate Development, Staging, and Production in event fields and dashboards.
 - Verify current Roblox event quotas, field limits, retention, and policy before activation.
+
+## Phase 4 implementation checkpoint
+
+`TelemetryService` currently emits version-1, server-authored Development diagnostics only.
+It sanitizes each payload against an exact event/field schema, rejects unknown or control-text
+fields, caps text at 64 characters and payloads at eight fields, and exposes bounded event,
+dropped-event, version, and last-event counters as Workspace attributes. Valid events print a
+JSON envelope containing only version, environment, event name, server time, and sanitized
+payload. No raw UserId, display name, client payload, per-frame position, aim sample, receipt,
+or secret is included.
+
+Implemented event allowlist:
+
+| Event | Current fields |
+| --- | --- |
+| `session_started` | optional storage class |
+| `queue_joined` | Practice/Casual mode |
+| `queue_cancelled` | mode and bounded wait seconds |
+| `queue_matched` | mode, Bot/Player opponent, bounded wait seconds |
+| `match_started` | Practice/Casual/Rematch mode, versus-bot flag, participant count |
+| `match_completed` | bounded reason, versus-bot flag, bounded duration |
+| `rematch_selected` | versus-bot flag |
+| `shot_fired` | bounded weapon ID and Bot/Player actor |
+| `projectile_impacted` | weapon ID and bounded changed-cell count |
+| `cosmetic_equipped` | bounded cosmetic ID |
+| `settings_changed` | reduced-effects, camera-shake, and UI-scale snapshot |
+| `telemetry_error` | bounded source and code |
+
+The broader funnel, economy, reliability, dashboards, and Production sink below remain the
+target design. They are not claimed as implemented until a reviewed backend, retention/access
+policy, sampling plan, and scripted Studio reconciliation pass exist.
 
 ## Common event envelope
 

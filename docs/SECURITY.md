@@ -73,6 +73,19 @@ Tune from real traffic. These are maximum request budgets, not expected client r
 
 Server-to-client visual events are also bounded by weapon definitions and match state. No client can request arbitrary particle count, sound ID, asset ID, or camera target.
 
+Implemented Phase 3/4 admission is deliberately tighter for persistence-backed actions:
+
+- Lobby actions are exact-shape parsed and accepted at most once per player every 0.15 seconds;
+  queue membership/token and single-arena availability remain authoritative.
+- Equip and settings share a one-second per-player cooldown, a maximum of 20 accepted requests
+  per rolling minute, and a server-wide bucket of 12 requests refilling at one per second.
+  Unknown cosmetics and malformed/empty settings patches are rejected before consuming that
+  persistence budget.
+- A player may request the retained active-projectile presentation at most once per second;
+  the response contains no hit, damage, terrain, health, or result authority.
+- The per-profile mutation queue holds at most four pending items; adjacent settings patches
+  coalesce and callback fan-out is capped, bounding memory and DataStore pressure.
+
 Rate-limit violations are dropped and counted. One noisy sample does not cause a permanent sanction. Escalation considers repeated, high-confidence violations across independent checks and favors session restriction/kick before any durable action. Durable bans require human-reviewable evidence and an appeal/support path.
 
 ## Combat protections
@@ -124,6 +137,9 @@ Environment is compiled/configured from approved place identity and validated at
 - If a safe session cannot be established, use read-only/no-reward behavior or refuse progression play with a clear retry path.
 - Autosave, PlayerRemoving, and BindToClose share serialized write logic.
 - Stable item IDs are never reused; unknown profile IDs are quarantined and logged.
+- Schema v2 validates a maximum-32 dense cosmetic inventory, one enabled owned equipped item,
+  and finite bounded settings. Equip/settings writes run through the same lease-protected
+  serialized UpdateAsync worker as rewards; read-only/unavailable profiles cannot mutate.
 - Production migration requires staging rehearsal, snapshot/version recovery path, explicit owner approval, and a forward-fix/rollback decision.
 
 ### Grant ledger
@@ -176,6 +192,11 @@ Do not log:
 - exact personal identifiers in custom analytics when platform-level aggregation suffices.
 
 Security diagnostics have retention/access controls and are not used to shame players. Use server timestamps and correlation IDs to reconstruct state transitions and grant attempts.
+
+The current Phase 4 sink is Development-only: exact allowlisted server events are sanitized,
+printed as bounded JSON, and counted in Workspace attributes. It has no client-authored event
+remote, no raw UserId field, and no Production backend. Backend activation requires a separate
+privacy, retention, quota, access, and environment-isolation review.
 
 ## Security verification
 

@@ -1,7 +1,10 @@
 --!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Cosmetics = require(ReplicatedStorage.Shared.Config.Cosmetics)
 local EconomyConfig = require(ReplicatedStorage.Shared.Config.EconomyConfig)
+local EnvironmentConfig = require(ReplicatedStorage.Shared.Config.EnvironmentConfig)
+local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local ProfileRules = require(ReplicatedStorage.Shared.Progression.ProfileRules)
 
 local function reward(key: string): ProfileRules.ProcessedReward
@@ -22,25 +25,40 @@ return function()
 	local expect = testEnvironment.expect
 
 	describe("ProfileRules schema", function()
+		it("advances the schema without changing the Development DataStore namespace", function()
+			expect(ProfileRules.CURRENT_SCHEMA_VERSION).to.equal(2)
+			expect(EnvironmentConfig.schemaVersion).to.equal(2)
+			expect(EnvironmentConfig.dataStoreName).to.equal("DEV_CritterClash_Profile_v1")
+		end)
+
 		it("creates independent valid starter profiles", function()
 			local first = ProfileRules.createDefault()
 			local second = ProfileRules.createDefault()
 
 			expect(ProfileRules.validate(first)).to.equal(true)
-			expect(first.schemaVersion).to.equal(1)
+			expect(first.schemaVersion).to.equal(2)
 			expect(first.economyVersion).to.equal(EconomyConfig.version)
 			expect(first.coins).to.equal(0)
 			expect(first.xp).to.equal(0)
 			expect(first.stats.matchesPlayed).to.equal(0)
 			expect(#first.processedRewards).to.equal(0)
+			expect(first.inventory.equippedCosmetic).to.equal(Cosmetics.STARTER_COSMETIC_ID)
+			expect(first.inventory.ownedCosmetics[1]).to.equal(Cosmetics.STARTER_COSMETIC_ID)
+			expect(first.settings.reducedEffects).to.equal(false)
+			expect(first.settings.cameraShake).to.equal(SettingsConfig.defaultCameraShake)
+			expect(first.settings.uiScale).to.equal(1)
 
 			first.stats.matchesPlayed = 1
 			table.insert(first.processedRewards, reward("Development|match|one|user|101"))
+			first.inventory.ownedCosmetics[1] = "changed"
+			first.settings.reducedEffects = true
 			expect(second.stats.matchesPlayed).to.equal(0)
 			expect(#second.processedRewards).to.equal(0)
+			expect(second.inventory.ownedCosmetics[1]).to.equal(Cosmetics.STARTER_COSMETIC_ID)
+			expect(second.settings.reducedEffects).to.equal(false)
 		end)
 
-		it("deep-clones stats and reward entries", function()
+		it("deep-clones stats, reward entries, inventory, and settings", function()
 			local original = ProfileRules.createDefault()
 			original.stats.matchesPlayed = 1
 			original.stats.wins = 1
@@ -49,9 +67,13 @@ return function()
 			local copy = ProfileRules.clone(original)
 			copy.stats.wins = 0
 			copy.processedRewards[1].coins = 99
+			copy.inventory.ownedCosmetics[1] = "changed"
+			copy.settings.cameraShake = 0
 
 			expect(original.stats.wins).to.equal(1)
 			expect(original.processedRewards[1].coins).to.equal(40)
+			expect(original.inventory.ownedCosmetics[1]).to.equal(Cosmetics.STARTER_COSMETIC_ID)
+			expect(original.settings.cameraShake).to.equal(SettingsConfig.defaultCameraShake)
 		end)
 
 		it("rejects negative, fractional, non-finite, and excessive balances", function()
@@ -130,6 +152,19 @@ return function()
 
 			expect(ProfileRules.validate(profile)).to.equal(false)
 		end)
+
+		it("requires valid inventory and settings in current-schema profiles", function()
+			local missingInventory: any = ProfileRules.createDefault()
+			missingInventory.inventory = nil
+			local unownedEquip = ProfileRules.createDefault()
+			unownedEquip.inventory.ownedCosmetics = {}
+			local invalidSettings = ProfileRules.createDefault()
+			invalidSettings.settings.uiScale = SettingsConfig.maximumUiScale + 0.01
+
+			expect(ProfileRules.validate(missingInventory)).to.equal(false)
+			expect(ProfileRules.validate(unownedEquip)).to.equal(false)
+			expect(ProfileRules.validate(invalidSettings)).to.equal(false)
+		end)
 	end)
 
 	describe("ProfileRules migration", function()
@@ -150,11 +185,13 @@ return function()
 			local profile, reason = ProfileRules.migrate(legacy)
 			assert(profile ~= nil, reason)
 
-			expect(profile.schemaVersion).to.equal(1)
+			expect(profile.schemaVersion).to.equal(2)
 			expect(profile.coins).to.equal(75)
 			expect(profile.xp).to.equal(350)
 			expect(profile.stats.matchesPlayed).to.equal(0)
 			expect(#profile.processedRewards).to.equal(0)
+			expect(profile.inventory.equippedCosmetic).to.equal(Cosmetics.STARTER_COSMETIC_ID)
+			expect(profile.settings.reducedEffects).to.equal(false)
 			expect(legacy.schemaVersion).to.equal(0)
 		end)
 
@@ -183,13 +220,70 @@ return function()
 				xp = 0,
 			})
 			local future, futureReason = ProfileRules.migrate({
-				schemaVersion = 2,
+				schemaVersion = 3,
 			})
 
 			expect(ambiguous).to.equal(nil)
 			expect(corrupt).to.equal(nil)
 			expect(future).to.equal(nil)
 			expect(futureReason).to.equal("future_schema")
+		end)
+
+		it("migrates v1 economy state and reward history into v2 without mutation", function()
+			local legacy = {
+				schemaVersion = 1,
+				economyVersion = EconomyConfig.version,
+				coins = 875,
+				xp = 1_250,
+				stats = {
+					matchesPlayed = 3,
+					wins = 1,
+					losses = 1,
+					draws = 1,
+				},
+				processedRewards = {
+					reward("Development|match|preserved|user|101"),
+				},
+			}
+			local profile, reason = ProfileRules.migrate(legacy)
+			assert(profile ~= nil, reason)
+
+			expect(profile.schemaVersion).to.equal(2)
+			expect(profile.economyVersion).to.equal(legacy.economyVersion)
+			expect(profile.coins).to.equal(875)
+			expect(profile.xp).to.equal(1_250)
+			expect(profile.stats.matchesPlayed).to.equal(3)
+			expect(profile.stats.wins).to.equal(1)
+			expect(profile.stats.losses).to.equal(1)
+			expect(profile.stats.draws).to.equal(1)
+			expect(#profile.processedRewards).to.equal(1)
+			expect(profile.processedRewards[1].key).to.equal("Development|match|preserved|user|101")
+			expect(profile.inventory.equippedCosmetic).to.equal(Cosmetics.STARTER_COSMETIC_ID)
+			expect(profile.settings.musicVolume).to.equal(SettingsConfig.defaultMusicVolume)
+
+			profile.stats.wins = 99
+			profile.processedRewards[1].coins = 99
+			expect(legacy.stats.wins).to.equal(1)
+			expect(legacy.processedRewards[1].coins).to.equal(40)
+		end)
+
+		it("rejects corrupt v1 records instead of replacing their progression", function()
+			local corrupt, reason = ProfileRules.migrate({
+				schemaVersion = 1,
+				economyVersion = EconomyConfig.version,
+				coins = 875,
+				xp = 1_250,
+				stats = {
+					matchesPlayed = 2,
+					wins = 1,
+					losses = 0,
+					draws = 0,
+				},
+				processedRewards = {},
+			})
+
+			expect(corrupt).to.equal(nil)
+			expect(reason).to.equal("invalid_stats_total")
 		end)
 
 		it("returns an independent clone for an already-current profile", function()

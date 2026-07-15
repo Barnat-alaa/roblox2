@@ -143,6 +143,9 @@ Expansion weapons are added in small batches after the four foundations feel goo
 - Character language: large expressive head, compact body, strong hands/feet, distinct outline, exaggerated eyebrows, visible anticipation, comic recoil, strong nonverbal reactions.
 - Candidate species include capybara, raccoon, otter, gecko, boar, axolotl, pigeon, fennec fox, hedgehog, and red panda, subject to originality review.
 - Do not pair species, colors, proportions, accessories, or poses in a combination strongly associated with a reference title.
+- The current starter identity item is the original Sunset Scout Scarf: free, owned/equipped
+  by default, code-built, and presentation-only. It establishes the loadout path without
+  implying that the final launch catalog or production character art is complete.
 
 ## Bot behavior
 
@@ -173,6 +176,12 @@ Teach through required actions and immediate feedback, not long dialogue. A play
 
 MVP lobby actions are Practice, Casual Queue, Loadout, Settings, and later Store. Friends, parties, quests, progression, private matches, and seasons appear only when implemented; do not show dead buttons as promises.
 
+The current field-camp lobby implements Practice, Casual, Loadout, and Settings. Practice is
+immediate bot play when the arena is free. Casual is same-server FIFO: two humans pair first;
+a lone search bot-fills after about eight seconds. This is a clear low-population MVP path,
+not cross-server ranked matchmaking. Return to Camp is explicit, while rematch retains only
+the exact connected roster that just finished.
+
 The results screen prioritizes:
 
 1. Clear winner and the decisive moment.
@@ -186,7 +195,9 @@ Never show a purchase prompt during aiming, immediately after a loss, before tut
 ## Accessibility and comfort
 
 - Respect safe areas, scalable text, touch target size, and contrast; do not encode state with color alone.
-- Provide camera-shake strength, music/SFX volume, reduced effects, and input labels that change with current device.
+- Provide camera-shake strength, music/SFX volume, reduced effects, UI scale, and input labels
+  that change with current device. The current slice applies shake/reduced-effects/UI-scale;
+  volume fields are reserved until original audio exists.
 - Avoid full-screen flashes, excessive particles, prolonged forced camera motion, and high-frequency audio.
 - Keep projectiles and critters visually distinct from every background.
 - Validate on real Android hardware and a low-to-mid-range laptop before limited beta.

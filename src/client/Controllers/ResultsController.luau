@@ -1,9 +1,11 @@
 --!strict
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local MatchRules = require(ReplicatedStorage.Shared.Simulation.MatchRules)
+local ClientSettings = require(script.Parent.ClientSettings)
 
 local MAX_PARTICIPANTS = 8
 local MAX_DISPLAY_NAME_BYTES = 96
@@ -551,7 +553,9 @@ end
 
 function ResultsController.create(
 	matchEventRemote: RemoteEvent,
-	requestRematchRemote: RemoteEvent
+	requestRematchRemote: RemoteEvent,
+	requestLobbyActionRemote: RemoteEvent?,
+	lobbyEventRemote: RemoteEvent?
 ): Controller
 	local localPlayer = Players.LocalPlayer
 	local playerGuiInstance = localPlayer:WaitForChild("PlayerGui")
@@ -586,6 +590,11 @@ function ResultsController.create(
 	sizeConstraint.MaxSize = Vector2.new(580, 580)
 	sizeConstraint.MinSize = Vector2.new(280, 340)
 	sizeConstraint.Parent = panel
+
+	local accessibilityScale = Instance.new("UIScale")
+	accessibilityScale.Name = "AccessibilityScale"
+	accessibilityScale.Scale = ClientSettings.readLocal(localPlayer).uiScale
+	accessibilityScale.Parent = panel
 
 	local titleLabel = createLabel(
 		panel,
@@ -682,18 +691,39 @@ function ResultsController.create(
 
 	local rematchButton = Instance.new("TextButton")
 	rematchButton.Name = "RematchButton"
-	rematchButton.AnchorPoint = Vector2.new(0.5, 0)
+	rematchButton.AnchorPoint = Vector2.zero
 	rematchButton.AutoButtonColor = false
 	rematchButton.BackgroundColor3 = DEEP_TEAL
-	rematchButton.Position = UDim2.new(0.5, 0, 1, -96)
-	rematchButton.Size = UDim2.new(0.62, 0, 0, 52)
+	rematchButton.Position = UDim2.new(0, 24, 1, -96)
+	rematchButton.Size = UDim2.new(0.5, -30, 0, 52)
 	rematchButton.Font = Enum.Font.GothamBold
 	rematchButton.Text = "REMATCH"
 	rematchButton.TextColor3 = IMPACT_WHITE
 	rematchButton.TextSize = 20
+	rematchButton.Selectable = true
 	rematchButton.Parent = panel
 	addCorner(rematchButton, 13)
 	addStroke(rematchButton, CREAM, 2)
+
+	local returnButton = Instance.new("TextButton")
+	returnButton.Name = "ReturnToLobbyButton"
+	returnButton.AutoButtonColor = false
+	returnButton.BackgroundColor3 = WARM_CORAL
+	returnButton.Position = UDim2.new(0.5, 6, 1, -96)
+	returnButton.Size = UDim2.new(0.5, -30, 0, 52)
+	returnButton.Font = Enum.Font.GothamBold
+	returnButton.Text = "RETURN TO CAMP"
+	returnButton.TextColor3 = IMPACT_WHITE
+	returnButton.TextScaled = true
+	returnButton.Selectable = true
+	returnButton.Visible = requestLobbyActionRemote ~= nil
+	returnButton.Parent = panel
+	addCorner(returnButton, 13)
+	addStroke(returnButton, CREAM, 2)
+	local returnTextConstraint = Instance.new("UITextSizeConstraint")
+	returnTextConstraint.MinTextSize = 11
+	returnTextConstraint.MaxTextSize = 17
+	returnTextConstraint.Parent = returnButton
 
 	local rematchHintLabel = createLabel(
 		panel,
@@ -718,6 +748,7 @@ function ResultsController.create(
 	local requiredUserIds: { [number]: boolean } = {}
 	local localReady = false
 	local canRequestRematch = false
+	local returnPending = false
 	local lastRequestAt = -math.huge
 	local closedMatchIds: { [string]: boolean } = {}
 	local closedMatchOrder: { string } = {}
@@ -769,7 +800,7 @@ function ResultsController.create(
 	end
 
 	local function updateRematchButton()
-		rematchButton.Active = canRequestRematch
+		rematchButton.Active = canRequestRematch and not returnPending
 		if not canRequestRematch then
 			rematchButton.Text = "SPECTATING"
 			rematchButton.BackgroundColor3 = DARK_NAVY
@@ -783,6 +814,13 @@ function ResultsController.create(
 				then "Press again to cancel readiness"
 				else "Toggle readiness for another round"
 		end
+	end
+
+	local function updateReturnButton()
+		returnButton.Active = requestLobbyActionRemote ~= nil and not returnPending
+		returnButton.Text = if returnPending then "RETURNING..." else "RETURN TO CAMP"
+		returnButton.BackgroundColor3 = if returnPending then GOLDEN else WARM_CORAL
+		returnButton.TextColor3 = if returnPending then DARK_NAVY else IMPACT_WHITE
 	end
 
 	local function updateParticipantReadyStates()
@@ -802,6 +840,9 @@ function ResultsController.create(
 		if closeMatch and matchId then
 			rememberClosed(matchId)
 		end
+		if GuiService.SelectedObject and GuiService.SelectedObject:IsDescendantOf(overlay) then
+			GuiService.SelectedObject = nil
+		end
 		overlay.Visible = false
 		currentMatchId = nil
 		currentResultTime = -math.huge
@@ -809,9 +850,11 @@ function ResultsController.create(
 		latestRewardTime = -math.huge
 		localReady = false
 		canRequestRematch = false
+		returnPending = false
 		renderLocalReward(nil)
 		clearParticipantRows()
 		updateRematchButton()
+		updateReturnButton()
 	end
 
 	local function createParticipantRow(
@@ -870,6 +913,17 @@ function ResultsController.create(
 	end
 
 	local function showResult(result: ResultPayload)
+		local lobbyMatchId = localPlayer:GetAttribute("LobbyMatchId")
+		if
+			localPlayer:GetAttribute("LobbyState") ~= "InMatch"
+			or (
+				type(lobbyMatchId) == "string"
+				and lobbyMatchId ~= ""
+				and lobbyMatchId ~= result.matchId
+			)
+		then
+			return
+		end
 		if
 			closedMatchIds[result.matchId]
 			or currentMatchId == result.matchId
@@ -890,6 +944,7 @@ function ResultsController.create(
 		latestStatusTime = result.serverTime
 		latestRewardTime = result.serverTime
 		localReady = false
+		returnPending = false
 		for order, participant in result.participants do
 			createParticipantRow(participant, result, order)
 		end
@@ -920,7 +975,9 @@ function ResultsController.create(
 		reasonLabel.Text = reasonText(result.reason)
 		rematchStatusLabel.Text = "READY FOR ANOTHER ROUND?"
 		updateRematchButton()
+		updateReturnButton()
 		overlay.Visible = true
+		GuiService.SelectedObject = if canRequestRematch then rematchButton else returnButton
 	end
 
 	local function applyRematchStatus(status: RematchStatusPayload)
@@ -1019,6 +1076,50 @@ function ResultsController.create(
 			ready = localReady,
 		})
 	end)
+	local returnConnection = returnButton.Activated:Connect(function()
+		if not requestLobbyActionRemote or not currentMatchId or not overlay.Visible then
+			return
+		end
+		local now = os.clock()
+		if now - lastRequestAt < REQUEST_COOLDOWN_SECONDS then
+			return
+		end
+		lastRequestAt = now
+		returnPending = true
+		updateRematchButton()
+		updateReturnButton()
+		requestLobbyActionRemote:FireServer({ action = "ReturnToLobby" })
+	end)
+	local lobbyStateConnection = localPlayer
+		:GetAttributeChangedSignal("LobbyState")
+		:Connect(function()
+			if overlay.Visible and localPlayer:GetAttribute("LobbyState") ~= "InMatch" then
+				hideCurrentResult(true)
+			end
+		end)
+	local lobbyEventConnection = if lobbyEventRemote
+		then lobbyEventRemote.OnClientEvent:Connect(function(kind: any, payload: any)
+			if not returnPending then
+				return
+			end
+			if kind == "Rejected" then
+				returnPending = false
+				rematchStatusLabel.Text = "RETURN UNAVAILABLE // TRY AGAIN"
+				rematchStatusLabel.TextColor3 = WARM_CORAL
+				updateRematchButton()
+				updateReturnButton()
+			elseif kind == "State" and type(payload) == "table" and payload.state == "InMatch" then
+				returnPending = false
+				updateRematchButton()
+				updateReturnButton()
+			end
+		end)
+		else nil
+	local scaleConnection = localPlayer
+		:GetAttributeChangedSignal("ClientUIScale")
+		:Connect(function()
+			accessibilityScale.Scale = ClientSettings.readLocal(localPlayer).uiScale
+		end)
 
 	local matchEventConnection = matchEventRemote.OnClientEvent:Connect(
 		function(kind: any, payload: any)
@@ -1070,6 +1171,12 @@ function ResultsController.create(
 			end
 			destroyed = true
 			rematchConnection:Disconnect()
+			returnConnection:Disconnect()
+			lobbyStateConnection:Disconnect()
+			if lobbyEventConnection then
+				lobbyEventConnection:Disconnect()
+			end
+			scaleConnection:Disconnect()
 			matchEventConnection:Disconnect()
 			clearParticipantRows()
 			screenGui:Destroy()

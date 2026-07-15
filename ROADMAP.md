@@ -27,8 +27,8 @@ Project Critter Clash is a temporary internal codename. This plan targets an ori
 
 ## Implementation checkpoint — 2026-07-15
 
-The authoritative 1v1 loop, solo bot, Phase 1 combat correctness, and Phase 2 progression
-foundation are implemented in the local `0.5.0-dev` Development build:
+The authoritative 1v1 loop, solo bot, Phase 1 combat correctness, Phase 2 progression, and
+Phase 3/4 lobby/comfort slice are implemented in the local `0.7.0-dev` Development build:
 
 - movement is turn-token and sequence scoped, speed/arena/plane constrained, and charged by
   cumulative path distance with bounded grounded jumps;
@@ -37,9 +37,9 @@ foundation are implemented in the local `0.5.0-dev` Development build:
 - explosion damage is restricted to the current roster, projectile finalization is leased to
   the exact match resolution, and readiness/results waits have bounded recovery;
 - client and server high-frequency work remains cadence- or count-bounded;
-- schema-v1 profiles validate bounded integer coins, XP, win/loss/draw statistics, and a
-  bounded 64-entry processed-reward ledger; account level is derived from XP and schema v0
-  profiles have a strict migration path;
+- schema-v2 profiles validate bounded integer coins, XP, win/loss/draw statistics, a bounded
+  64-entry processed-reward ledger, cosmetic inventory/equipment, and normalized settings;
+  account level is derived from XP and schema v0/v1 profiles have strict migration paths;
 - Development persistence uses UpdateAsync session leases, bounded retries, autosave,
   shutdown draining, and explicit read-only/unavailable states; unpublished Studio selects a
   deliberate process-local session-memory adapter with no cross-session persistence;
@@ -48,19 +48,32 @@ foundation are implemented in the local `0.5.0-dev` Development build:
   version, so retuning cannot regrant an already processed match;
 - profile status/balances/derived level and pending/resolved reward feedback are presented by
   the client without accepting client-authored currency values;
-- source contains 111 TestEZ specs. The latest recorded Studio TestEZ execution remains the
-  earlier 56-pass run, so Phase 1 physics/feel and the Phase 2 runtime path still require
-  user-run acceptance. Published Development DataStore behavior has not been validated.
+- a compact field-camp lobby owns admission: Practice is immediate bot play when available,
+  Casual is same-server FIFO with human pairing and an eight-second bot fill, Results can
+  return to lobby, and rematch cannot import spectators;
+- one original free Sunset Scout Scarf is owned/equipped by default, previewed in Loadout,
+  persisted through schema v2, and applied as nonphysical appearance only;
+- reduced-effects, camera-shake, and UI-scale settings apply immediately and persist; touch,
+  responsive layouts, and gamepad bindings are implemented in source;
+- late clients can request one rate-limited active projectile launch snapshot after their
+  handlers connect, without receiving outcome authority;
+- versioned allowlisted Development telemetry covers the implemented session/queue/match,
+  rematch, shot/impact, cosmetic, and settings events without raw user identifiers;
+- source contains 137 TestEZ specs. The latest recorded Studio TestEZ execution remains the
+  earlier 56-pass run, so Phase 1-4 runtime/device behavior still requires user-run
+  acceptance. Published Development DataStore behavior has not been validated.
 
-**Immediate acceptance step:** run the 111-spec suite and the combined movement/support/bot,
-profile, and result-reward checklist in `NEXT_ACTIONS.md`, then return screenshots or a feel
-description. The unpublished place can verify the session-memory path only; cloud persistence
-requires an owner-run published Development-place test.
+**Immediate acceptance step:** run the 137-spec suite and the combined movement/support/bot,
+profile/reward, lobby/loadout/settings, late-projectile, and input/device checklist in
+`NEXT_ACTIONS.md`, then return screenshots or a feel description. The unpublished place can
+verify the session-memory path only; cloud persistence requires an owner-run published
+Development-place test.
 
-**Next implementation milestone after acceptance:** add the compact lobby and one free
-original cosmetic with validated ownership/equip persistence. Then continue late-projectile
-recovery, mobile/accessibility, audio/analytics, and private publication only with owner
-approval. No Development or Production place has been published.
+**Next implementation milestone after acceptance:** tune the current original presentation
+from screenshots and device feel, add only provenance-cleared original audio/assets, and run
+the private release-candidate gates. Purchase plumbing, paid SKUs, analytics activation, and
+publication remain separate owner-approved work. No Development or Production place has been
+published.
 
 ## Seven-day private MVP
 
@@ -84,7 +97,7 @@ The critical path is repository and Studio sync → combat plane → turn author
 | M2.1 | Implement the server-owned match/turn state machine and 20-second prototype timer; tune toward 18 from playtests | M1.3 | 2 h / NET | Only the active participant can act; timeout advances exactly once; disconnect does not deadlock | Collapse Movement and Aiming into one ActiveTurn state while retaining explicit transition guards |
 | M2.2 | **IMPLEMENTED; STUDIO ACCEPTANCE PENDING:** enforce bounded left/right movement and jump with plane, accumulated-distance, speed, jump-frequency, grounded-state, and arena validation | M1.4, M2.1 | 1.5 h / NET | Server rejects off-turn, over-speed, excess-distance, excess-jump, airborne-jump, and out-of-bounds movement in two-client tests | Disable jumping and use a fixed movement-distance budget |
 | M2.3 | Add angle, power, weapon selection, round wind, active-player HUD, health, and timer | M2.1 | 1.5 h / UI, GD | PC input reaches min/max values predictably; HUD clearly identifies actor, wind, weapon, and time | Use buttons/keys with discrete angle and power steps |
-| M2.4 | Build the first mobile input layout and safe-area/resolution pass | M2.3 | 1 h / UI, QA | Core controls work at representative phone and tablet emulation sizes with no overlap or hover requirement | Ship separate angle/power controls; defer drag-to-aim comparison |
+| M2.4 | **IMPLEMENTED IN SOURCE; DEVICE ACCEPTANCE PENDING:** mobile input layout, responsive scaling, and safe-area-aware panels | M2.3 | 1 h / UI, QA | Core controls work at representative phone and tablet sizes with no overlap or hover requirement | Ship separate angle/power controls; defer drag-to-aim comparison |
 
 **Day 2 gate:** a player and bot/test client alternate legal turns, including safe timeout, on keyboard and mobile emulation.
 
@@ -94,7 +107,7 @@ The critical path is repository and Studio sync → combat plane → turn author
 | --- | --- | --- | --- | --- | --- |
 | M3.1 | Implement shared fixed-step ballistics with gravity, signed horizontal wind, and raycast sweeps | M2.3 | 2 h / NET | Unit cases match known no-wind and wind trajectories; a fast projectile cannot tunnel through test walls | Use one fixed projectile speed range and cap lifetime at eight seconds |
 | M3.2 | Add validated FireWeapon request and server shot ownership, origin, angle, power, and weapon lookup | M2.1, M3.1 | 1 h / NET | Forged origin, weapon, power, repeat fire, and off-turn requests cause no shot or damage | Allow only Acorn Cannon until validation is stable |
-| M3.3 | Add pooled client projectile presentation, approximate trajectory preview, and projectile-follow camera | M3.1 | 1 h / ENG, UI | Visual path follows server events closely; preview is labelled/understood as affected by wind; effects do not decide hits | Use a single server-replicated visual and omit dotted preview |
+| M3.3 | **IMPLEMENTED; LATE-JOIN ACCEPTANCE PENDING:** pooled client projectile presentation, approximate preview, follow camera, and rate-limited active-launch recovery | M3.1 | 1 h / ENG, UI | Visual path follows server events closely, a late client recovers the active launch, and effects never decide hits | Use a single server-replicated visual and omit dotted preview |
 | M3.4 | Add explosion falloff, bounded knockback, health, elimination, match result, and next-turn settling | M3.2 | 2 h / NET, GD | One complete match can be won; damage occurs once; self/friendly-fire rule is consistent; velocities remain bounded | Disable knockback and line-of-sight attenuation; keep radial server damage |
 
 **Day 3 gate:** the server alone can resolve a full 1v1 elimination match with Acorn Cannon.
@@ -117,7 +130,7 @@ The critical path is repository and Studio sync → combat plane → turn author
 | M5.1 | Configure Fizzy Bomb and Bubble Bouncer with fuse/bounce limits, completing four original weapons | M3.1, M4.3 | 1.5 h / GD, ENG | Each weapon has a distinct legal trajectory and readable role; all terminate within lifetime bounds | Ship two polished weapons and show the other two as unavailable previews |
 | M5.2 | **IMPLEMENTED; USER VALIDATION PENDING:** an imperfect bot selects a target, solves a bounded shot with difficulty error, and uses normal fire validation | M3.2 | 1.5 h / ENG, GD | Bot fires before timeout and can finish/rematch a match without hidden damage or perfect information; final-tuning runtime signoff remains open | Bot uses Acorn Cannon/Mole Drill through a bounded deterministic search |
 | M5.3 | **IMPLEMENTED; RUNTIME ACCEPTANCE PENDING:** Results/rematch use unique session-scoped match identities and enqueue server-derived, idempotent coins/XP grants before Results replication; profile and Results UI show pending/resolved status | M3.4 | 1 h / DATA, UI | Win/loss and reward are clear; rematch begins cleanly; reachable result/retry calls resolve once within the retained ledger | Disable a grant when its profile is not safely writable |
-| M5.4 | **IMPLEMENTED; PUBLISHED DEVELOPMENT VALIDATION PENDING:** schema-v1 profile validation, schema-v0 migration, session leases, bounded retry/autosave/shutdown behavior, read-only failure handling, and a 64-entry reward ledger | M5.3 result identity | 2 h / DATA, NET | Current 111-spec source covers pure profile/reward/session rules; owner-run published Development tests must still prove leave/rejoin, concurrent session, retry, and shutdown behavior against DataStoreService | Unpublished Studio uses session memory; keep rewards disabled for read-only/unavailable profiles |
+| M5.4 | **IMPLEMENTED; PUBLISHED DEVELOPMENT VALIDATION PENDING:** schema-v2 profile validation, schema-v0/v1 migration, session leases, bounded retry/autosave/shutdown behavior, read-only failure handling, a 64-entry reward ledger, inventory/equipment, and settings | M5.3 result identity | 2 h / DATA, NET | Current 137-spec source covers pure profile/reward/session/cosmetic/settings/lobby/telemetry rules; owner-run published Development tests must still prove migration, leave/rejoin, concurrent session, retry, and shutdown against DataStoreService | Unpublished Studio uses session memory; keep mutations disabled for read-only/unavailable profiles |
 
 **Day 5 gate:** pending owner-run published Development proof that a new player can finish and
 rematch a bot match, then rejoin with rewards intact.
@@ -126,13 +139,15 @@ rematch a bot match, then rejoin with rewards intact.
 
 | ID | Task | Depends on | Estimate / owner | Acceptance and test | Principal risk / fallback |
 | --- | --- | --- | --- | --- | --- |
-| M6.1 | Add a compact lobby with Practice, Casual Queue, Loadout, and Settings | M5.2 | 1 h / UI | Queue starts a player match when available and a bot match after a short wait; cancel is safe | Present Practice and immediate bot play only |
-| M6.2 | Add one free original cosmetic, ownership/equip validation, preview, and persistent loadout | M5.4 | 1 h / ART, DATA, UI | Owned cosmetic equips and persists; unowned IDs are rejected; appearance never changes stats | Use an original color/pattern material on the placeholder critter |
+| M6.1 | **IMPLEMENTED; STUDIO ACCEPTANCE PENDING:** compact lobby with Practice, Casual Queue, Loadout, Settings, FIFO admission, safe cancel, and Return to Lobby | M5.2 | 1 h / UI | Queue starts a player match when available and a bot match after a short wait; queued players never enter another roster | Present Practice and immediate bot play only |
+| M6.2 | **IMPLEMENTED; PERSISTENCE ACCEPTANCE PENDING:** free original Sunset Scout Scarf, ownership/equip validation, preview, appearance, and persistent loadout | M5.4 | 1 h / ART, DATA, UI | Owned cosmetic equips and persists; unowned IDs are rejected; appearance never changes stats | Use an original color/pattern material on the placeholder critter |
 | M6.3 | Implement purchase receipt plumbing and one development-only cosmetic test SKU | M5.4, M6.2 | 1 h / DATA, OWNER | Duplicate receipt tests grant once; cancelled/failed prompts grant nothing; no live SKU is enabled without owner approval | Use a mock receipt adapter in Development and ship no paid product |
-| M6.4 | Add original placeholder audio/effects, camera-shake and reduced-effects settings, and mobile/gamepad input pass | M3.3 | 1.5 h / ART, UI, QA | Effects remain readable; settings apply immediately; keyboard and mobile complete a match; gamepad smoke test passes if hardware exists | Keep silent/subtle generated placeholders and document gamepad as known issue |
-| M6.5 | Emit versioned onboarding, match, rematch, error, and purchase-test analytics | M5.3 | 0.5 h / DATA | Event QA shows one valid start/completion pair and no personal data or per-frame spam | Log a minimal server-side structured diagnostic stream until analytics is enabled |
+| M6.4 | **PARTIALLY IMPLEMENTED; DEVICE/AUDIO ACCEPTANCE PENDING:** camera-shake, reduced-effects, UI-scale settings, responsive mobile controls, and gamepad bindings; original audio remains unshipped | M3.3 | 1.5 h / ART, UI, QA | Effects remain readable; settings apply immediately; keyboard/mobile/gamepad complete a match on tested hardware | Keep the build silent until provenance-cleared original audio is ready |
+| M6.5 | **DEVELOPMENT SINK IMPLEMENTED; EVENT QA PENDING:** emit versioned allowlisted session, queue, match/rematch, shot/impact, cosmetic, and settings diagnostics | M5.3 | 0.5 h / DATA | One scripted session reconciles starts/completions and contains no personal data or per-frame spam | Keep structured Development logging until a reviewed analytics backend is enabled |
 
-**Day 6 gate:** the lobby-to-match-to-results loop works in mobile emulation, with persistent cosmetic equipment and validated telemetry.
+**Day 6 gate:** source implementation is present; the lobby-to-match-to-results loop, mobile/
+gamepad behavior, persistent cosmetic/settings equipment, projectile recovery, and telemetry
+sequence still require the owner/user-run acceptance matrix.
 
 ### Day 7 — private publication
 

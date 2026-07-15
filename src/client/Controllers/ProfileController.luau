@@ -4,6 +4,8 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
+local ClientSettings = require(script.Parent.ClientSettings)
+
 local MAX_SAFE_INTEGER = 9_007_199_254_740_991
 local WARNING_INTERVAL_SECONDS = 2
 
@@ -236,11 +238,10 @@ function ProfileController.create(): Controller
 	addCorner(panel, 13)
 	addStroke(panel, DEEP_TEAL, 2)
 
-	if touchLayout then
-		local uiScale = Instance.new("UIScale")
-		uiScale.Scale = panelScale
-		uiScale.Parent = panel
-	end
+	local uiScale = Instance.new("UIScale")
+	uiScale.Name = "AccessibilityScale"
+	uiScale.Scale = panelScale * ClientSettings.readLocal(localPlayer).uiScale
+	uiScale.Parent = panel
 
 	local headerLabel = createLabel(
 		panel,
@@ -388,6 +389,12 @@ function ProfileController.create(): Controller
 			localPlayer:GetAttributeChangedSignal(attributeName):Connect(scheduleRefresh)
 		)
 	end
+	table.insert(
+		connections,
+		localPlayer:GetAttributeChangedSignal("ClientUIScale"):Connect(function()
+			uiScale.Scale = panelScale * ClientSettings.readLocal(localPlayer).uiScale
+		end)
+	)
 	refresh()
 
 	local controller: Controller = {

@@ -2,10 +2,14 @@
 
 ## Current checkpoint
 
-Phase 1 combat correctness and Phase 2 profiles/rewards are implemented in source. The
-immediate next step is one combined Roblox Studio acceptance pass; screenshots, the Output
-summary, and a short feel description are enough for the next iteration. The unpublished
-place uses session memory, so this pass does not prove cross-session cloud persistence.
+Phase 1 combat correctness, Phase 2 profiles/rewards, Phase 3 lobby/loadout, and Phase 4
+comfort/recovery/diagnostics are implemented in the `0.7.0-dev` source. The immediate next
+step is one combined Roblox Studio acceptance pass. Send screenshots, the final Output
+summary, and a short description of how the game feels; that evidence will drive the next
+visual and fluidity tuning pass.
+
+The unpublished place uses process-local session memory. It can validate the complete UI and
+mutation path inside one server process, but it cannot prove cloud persistence across joins.
 
 ## Resume commands
 
@@ -17,100 +21,142 @@ rojo build default.project.json --output build/CritterClash.rbxlx
 rojo build test.project.json --output build/CritterClashTests.rbxlx
 ```
 
-## User-run Phase 1/2 acceptance
+## User-run Phase 1-4 acceptance
 
 ### 1. Automated Studio suite
 
 1. Open `build/CritterClashTests.rbxlx` in Roblox Studio.
 2. Press **Play** once.
 3. Open **View > Output**.
-4. Send the final TestEZ summary and any red error. Current source contains **111 specs**; do
-   not update the recorded runtime total unless Studio actually reports the result.
+4. Send the final TestEZ summary and every red error.
 
-### 2. Movement feel
+Current source contains **137 specs**. The last recorded Studio result is still **56 passed,
+0 failed, 0 skipped** from an older build; do not replace that recorded runtime result until
+Studio actually executes the current suite.
 
-Open `build/CritterClash.rbxlx`, start a solo match, and test during the human Aiming phase:
+### 2. Lobby and queue journey
 
-- Tap and hold `A`/`D`; movement should start quickly and remain smooth.
-- Reverse direction several times; the shared 22-stud allowance must decrease by total path
-  distance, not only final displacement.
-- Hold a direction until the allowance reaches zero; the character must stop without jitter,
-  repeated snapping, or continued walking.
-- Tap `Space`; a grounded jump should work. Spam it in the air and attempt more than two jumps
-  in one turn; no extra jump should occur.
-- Jump just before the 20-second timer ends; the same match and terrain should remain while
-  the character lands or receives bounded recovery, then the next turn should begin.
+Use `build/CritterClash.rbxlx` and verify the field-camp screen appears before combat:
 
-Send one short feel rating: **too slow / good / too fast**, plus whether stopping, jumping,
-camera tracking, or input response felt rough.
+- **Practice** should start one human against BotCritter immediately when the arena is free.
+- **Casual** should show queue position and an approximately eight-second countdown before a
+  bot fill when no second player arrives.
+- **Cancel** should return cleanly to Lobby, including when pressed repeatedly or near the bot
+  deadline.
+- In a one-server/two-client test, two Casual players should enter the same human 1v1 in FIFO
+  order; a third client must remain in the lobby as a spectator/queued player.
+- On both left and right spawn sides, the default aim and every aim adjustment must point
+  inward toward the arena; repeat after Rematch in case the local side changes.
+- `P`, `C`, `L`, and `S` should open Practice, Casual, Loadout, and Settings on keyboard.
+- Lobby buttons should remain navigable with gamepad selection and fit phone/tablet
+  emulation without clipped text or safe-area overlap.
 
-### 3. Terrain support and bot physics
+Send one wide lobby screenshot and report whether entry feels **instant / acceptable / slow**.
 
-- Remove terrain directly below the human and later below BotCritter.
-- Each actor should fall naturally, land on the first legal support, or be eliminated by the
-  hazard/death boundary within about three seconds; the match must never wait forever.
-- Confirm the bot body does not fall through intact terrain and still receives explosion
-  knockback.
-- Finish the match and choose Rematch. Confirm fresh health, terrain, bot, timer, wind, and
-  match ID with no red Output error.
+### 3. Loadout, cosmetic, and settings
 
-Send a wide gameplay screenshot after terrain loss, one bot screenshot, and the Output panel
-if anything looks wrong. Describe the symptom and which weapon/turn caused it.
+- Open Loadout and confirm **Sunset Scout Scarf** is shown as owned and equipped with its
+  original code-built preview.
+- Start a match and confirm the scarf appears on the critter without changing collision,
+  movement, health, aim origin, or knockback.
+- Respawn/rematch once and confirm the equipped appearance reapplies without duplicates.
+- Change UI scale, camera shake, and reduced effects. Each should change the local
+  presentation immediately, then reconcile to the server-owned value without flicker.
+- Change one setting, then change it again while the first save is still pending. The newest
+  edit must remain visible and become the saved value after the older acknowledgement.
+- Leave and reopen both panels in the same server session; the selected values should remain.
+- Loadout and Settings must close/refuse to open while `LobbyState` is `InMatch`.
+- Music/SFX profile fields are reserved for future original audio; the current build is
+  intentionally silent and exposes no fake audio implementation.
 
-### 4. Session-memory profile and reward flow
+Send one loadout screenshot, one in-match scarf screenshot, and note any panel that feels
+crowded, small, or visually flat.
 
-Use the unpublished local place for this integration check:
+### 4. Fluidity and input
 
-1. On join, confirm the compact profile panel leaves Loading and shows a writable
-   session-memory state, 0 coins, 0 XP, and level 1 for a new local user.
-2. Finish an eligible bot match. The Results reward should progress from Pending to Granted
-   and the profile panel should increase by the deterministic 85%-scaled amount. A normal bot
-   win is 51 coins and 127 XP; a loss is 34 coins and 85 XP; a draw is 42 coins and 106 XP.
-3. Confirm the Results screen never shows a second grant for the same match and the Output has
-   no DataService, migration, queue, or reward error.
-4. Select Rematch, finish again, and confirm the fresh match ID receives one separate grant.
-5. Stop and restart Studio. The local session-memory balance may reset by design; do not log
-   that as data loss. This adapter deliberately provides no cross-session persistence.
+During the human Aiming phase:
 
-Send one screenshot containing the profile panel and Results reward line, plus any red Output
-message. The client must never be able to choose its reward amount or edit the balance.
+- Hold and reverse `A`/`D`. Movement should begin quickly, remain smooth, stop cleanly at the
+  shared 22-stud path allowance, and never jitter or keep walking after release.
+- Tap `Space`; grounded jumps should work, while airborne spam and attempts beyond the
+  per-turn limit should not.
+- On touch emulation, movement/jump controls must stay on the left and aim/fire controls on
+  the right with no overlap. Combat controls should disappear outside the active turn.
+- On gamepad, left stick moves, `A` jumps, right stick changes angle/power, bumpers cycle
+  weapons, and right trigger fires. No mouse should be required for a full turn.
+- Reduced Effects should visibly reduce trajectory/effect density. Camera Shake at zero
+  should remove impact shake. UI scale should remain readable at 0.8, 1.0, and 1.2.
 
-### 5. Published Development persistence (owner-run gate)
+Send one phone-emulation screenshot and rate movement, aim, camera, and impact presentation
+individually as **rough / okay / fluid**.
 
-This is a later, separate validation in an owner-approved private Development experience; do
-not use Production data:
+### 5. Combat, terrain, and late-projectile recovery
 
-- use an authenticated positive-UserId client and confirm the profile panel reports
-  `CLOUD`/`Persistent`; published Studio synthetic users still select SessionMemory and do not
-  count as native DataStore evidence;
-- leave and rejoin after one eligible match and confirm coins, XP, statistics, level, and the
-  processed grant survive;
-- retry the same grant identity and confirm no second balance/stat change;
-- join the same account through competing sessions and confirm only one writable lease;
-- exercise transient DataStore failure/read-only recovery, PlayerRemoving, autosave, and
-  server shutdown, then confirm no default overwrite or duplicated reward;
-- inspect Output for bounded retry/failure diagnostics and verify the profile returns to Ready
-  only when it is safely writable.
+- Remove terrain below the human and later below BotCritter. Each actor should fall, land on
+  legal support, or reach bounded recovery/elimination within about three seconds; the match
+  must never wait forever.
+- Fire all four weapons at least once. Damage, craters/drill edits, camera follow, and turn
+  advance must happen once with no red Output error or long frame hitch.
+- Join/start a second client while a projectile is already in flight if Studio timing allows.
+  The late client should recover the one active launch presentation from its original server
+  timestamp; it must not spawn duplicate impacts or alter the outcome.
+- Finish the match and choose **Rematch**. Health, terrain, BotCritter, wind, timer, turn state,
+  projectile state, and match ID should all be fresh.
+- In Results, choose **Return to Camp** on one client. That player must return to Lobby and be
+  excluded from the old rematch roster; remaining players must not import a lobby spectator.
 
-Until that owner-run published Development matrix passes, cloud persistence is implemented
-but not runtime-accepted.
+Send a wide gameplay screenshot, a Results screenshot, and the Output panel if anything is
+wrong. Include the weapon and turn that produced the symptom.
 
-## Code follow-up after the evidence
+### 6. Profile, reward, and schema-v2 session path
 
-I will use the Studio evidence to tune movement speed, jump height, settlement thresholds,
-collision size, camera framing, progression feedback, and visual readability without asking
-you to debug code. Once this combined acceptance is stable, the roadmap advances to:
+In the unpublished local place:
 
-1. A compact lobby with clear Practice, Casual, Loadout, and Settings entry points.
-2. One free original cosmetic plus strict owned/equipped validation and schema migration.
-3. Screenshot-driven character, environment, HUD, and Results polish.
-4. Mobile/accessibility, audio, analytics, and late-projectile recovery work.
+1. Confirm the profile panel leaves Loading and reports `SESSION`/`SessionMemory` for a local
+   user, with a valid level, starter scarf, and normalized settings.
+2. Finish an eligible bot match. Reward feedback should progress from Pending to Granted once.
+   A normal bot win grants 51 coins/127 XP, loss 34/85, and draw 42/106.
+3. Confirm a duplicate result cannot grant a second balance/stat/ledger update.
+4. Rematch and finish again; the fresh match ID should receive one independent grant.
+5. Change a setting and equip the owned cosmetic while the profile is Ready. The attributes
+   and visible presentation should update only after a valid server mutation result.
+6. Stop/restart Studio. A reset SessionMemory balance/settings is expected and is not cloud
+   data loss.
 
-## Owner actions later
+Send one screenshot containing the profile panel and Results reward line. The client must
+never be able to author coins, XP, ownership, reward amount, damage, or match outcome.
 
-- Select or create a private Development experience for the cloud-persistence gate.
-- Grant tester access when a private publish is desired and run the Development-only
-  DataStore matrix above.
-- Create separate Staging and Production experiences before cloud-data testing.
+### 7. Published Development persistence gate (owner-run later)
 
-No Robux purchase, production key, paid product, or production publication is required now.
+Use a private owner-approved Development experience, never Production data:
+
+- use an authenticated positive-UserId client and require `CLOUD`/`Persistent`; synthetic or
+  unpublished users that select SessionMemory do not count as DataStore evidence;
+- validate schema-v0 and schema-v1 migration into schema v2 without losing coins, XP,
+  statistics, the retained reward ledger, starter ownership/equipment, or normalized settings;
+- leave and rejoin after rewards, cosmetic equip, and settings changes and confirm all survive;
+- retry the same grant identity and confirm no duplicate mutation;
+- test competing sessions, transient failure/read-only recovery, autosave, PlayerRemoving,
+  and BindToClose without a default overwrite or duplicated reward.
+
+Cloud persistence remains implemented but not runtime-accepted until this matrix passes.
+
+## Evidence to send
+
+The fastest useful handoff is:
+
+1. final TestEZ and Output summary;
+2. lobby, loadout, in-match, phone-emulation, and Results screenshots;
+3. one sentence each for movement, aiming, camera, impacts, UI readability, and queue speed;
+4. exact red error text, if any.
+
+## What follows acceptance
+
+I will use that evidence to tune pacing, movement response, camera framing, effect budgets,
+panel hierarchy, typography, palette, and character/environment presentation. After the
+current loop feels good, the next milestone is the private release-candidate pass: original
+audio/assets with recorded provenance, onboarding clarity, representative-device profiling,
+security/exploit testing, and rollback evidence.
+
+Purchase receipt plumbing, paid SKUs, analytics activation, public publication, Robux spend,
+and Production credentials remain separate owner-approved work.

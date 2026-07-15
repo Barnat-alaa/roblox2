@@ -59,6 +59,28 @@ All notable project changes are recorded here.
   Ineligible, ReadOnly, and Unavailable outcomes using server-owned state only.
 - Pure TestEZ coverage for profile validation/migration/level derivation, reward eligibility,
   calculation/idempotency/ledger bounds, and session lease/state rules.
+- Strict schema-v2 profiles with bounded starter cosmetic ownership/equipment and normalized
+  music, SFX, camera-shake, reduced-effects, and UI-scale settings; valid schema-v0/v1 data
+  migrates without losing economy statistics or the retained reward ledger.
+- Lease-protected queued profile mutations for cosmetic equip and settings, including bounded
+  queues, settings coalescing, no-op write avoidance, exact validation, safe ambiguous-write
+  reconciliation, and server-owned profile attributes.
+- A compact field-camp lobby with immediate Practice, same-server FIFO Casual pairing,
+  eight-second bot fill, idempotent cancellation, queue state/countdown, Return to Camp, and
+  exact-roster rematch isolation.
+- An original code-built Sunset Scout Scarf starter cosmetic with loadout preview and
+  nonphysical character presentation.
+- Responsive Loadout and Settings panels plus immediate reduced-effects, camera-shake, and UI
+  scale application across the lobby, profile, HUD, Results, trajectory, and effects layers.
+- Keyboard lobby shortcuts, touch control separation, and complete gamepad movement, jump,
+  aim, weapon-cycle, and fire bindings for the current match loop.
+- Rate-limited active-projectile presentation recovery for clients that finish loading after
+  the launch broadcast, retaining the authoritative launch timestamp without sharing outcome
+  authority.
+- Versioned, allowlisted Development telemetry and bounded Workspace diagnostics for session,
+  queue, match/rematch, shot/impact, cosmetic, and settings events without raw user IDs.
+- Pure TestEZ coverage for schema-v2 migration, cosmetic ownership/equip, settings patches,
+  lobby parsing/FIFO/bot-fill selection, and telemetry schema validation.
 
 ### Changed
 
@@ -82,7 +104,17 @@ All notable project changes are recorded here.
   fresh bounded deadline.
 - Throttled movement/correction diagnostics and remaining-distance replication.
 - Added a guarded Results expiry so abandoned result state cannot stall the server forever.
-- Advanced the local Development build marker to `0.5.0-dev`.
+- Advanced the local Development build marker to `0.7.0-dev`.
+- Match admission now belongs to LobbyService instead of automatically starting every
+  connected player; the HUD and combat controls remain hidden for lobby users and spectators.
+- Results now supports Return to Camp and waits for authoritative lobby state before closing,
+  preventing stale result/lobby races.
+- Reduced-effects mode lowers trajectory and projectile-effect density, while impact shake is
+  multiplied by the persisted comfort setting.
+- Aim direction now mirrors from the authoritative `MatchSpawnX` whenever a match/rematch
+  changes sides, preventing a lobby spectator position from locking shots away from rivals.
+- Settings saves serialize one in-flight request and retain newer dirty edits across delayed
+  acknowledgements; lobby and Results restore explicit gamepad focus on activation.
 
 ### Security
 
@@ -102,6 +134,15 @@ All notable project changes are recorded here.
   replaced by defaults, and read-only/unavailable profiles cannot receive progression grants.
 - Result rewards are derived from frozen authoritative MatchEnd state and applied with their
   processed-grant ledger entry in one safe update path; no client supplies a reward or balance.
+- Lobby, equip, settings, and projectile-snapshot remotes use exact-shape/type validation and
+  bounded rate limits; customization additionally has a shared per-player window and a
+  server-wide token budget.
+- Lobby and customization ingress silently drop cooldown bursts and bound malformed/rate-limit
+  feedback, preventing a rejected-packet flood from amplifying attribute and RemoteEvent work.
+- Cosmetics are allowlisted and ownership-checked on the server; generated parts are massless,
+  noncolliding, non-touching, non-queryable, and cannot alter combat statistics or aim origins.
+- Telemetry rejects unknown events/fields, caps field count/text length/event diagnostics,
+  omits raw user identifiers, and never accepts client-authored analytics payloads.
 - Malformed, stale, or revision-gapped client terrain state triggers rate-limited snapshot
   recovery instead of partial mutation.
 - Production publishing remains a manual, owner-approved operation.
@@ -110,10 +151,13 @@ All notable project changes are recorded here.
 
 - StyLua, Selene, Roblox-aware Luau analysis, and both Rojo builds passed.
 - Latest recorded Studio TestEZ run: 56 passed, 0 failed, 0 skipped. Current source contains
-  111 specs; the Phase 1/2 additions await a user-run Studio rerun.
+  137 specs; the Phase 1-4 additions await a user-run Studio rerun.
 - Phase 2 native DataStore behavior has not been validated in a published Development place;
   the unpublished Studio fallback is intentionally session-memory-only and is not evidence of
   cross-session durability.
+- Phase 3/4 lobby/loadout/settings, gamepad/mobile feel, active-projectile recovery, telemetry
+  event reconciliation, and schema-v2 persistence have not yet received integrated Studio or
+  representative-device acceptance.
 - The final terrain-enabled playable build booted clean with matching initial server/client
   terrain revision 0 and an active central hazard collision run.
 - A real Acorn request produced Delta 0 → 1 with 9 changed cells and matching server/client

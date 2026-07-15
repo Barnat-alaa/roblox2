@@ -11,16 +11,18 @@
 
 All values below are explicit test hypotheses. Change them through versioned configuration and record the effective version in analytics.
 
-## Phase 2 implementation checkpoint
+## Phase 2-4 implementation checkpoint
 
-Economy configuration version 1, reward eligibility/calculation, schema-v1 profiles, and the
+Economy configuration version 1, reward eligibility/calculation, schema-v2 profiles, and the
 idempotent retained-ledger match-grant path are implemented in source. Current source has pure coverage, but
 the latest recorded Studio suite remains the earlier 56-pass run and cloud persistence has not
 been validated in a published Development place.
 
-The current profile persists bounded integer coins, XP, win/loss/draw statistics, and a dense
-64-entry processed-reward ledger. Level is derived from XP. Unpublished Studio uses explicit
-process-local session memory, so balances are not expected to survive Studio stop/start.
+The current profile persists bounded integer coins, XP, win/loss/draw statistics, a dense
+64-entry processed-reward ledger, bounded cosmetic ownership/equipment, and normalized
+settings. Level is derived from XP. Every new/migrated profile receives the free original
+Sunset Scout Scarf; no coin shop or paid ownership grant exists yet. Unpublished Studio uses
+explicit process-local session memory, so data is not expected to survive Studio stop/start.
 
 ## Fairness invariants
 
@@ -100,7 +102,9 @@ Do not advertise locked modes or weapons until they exist and are balanced. Leve
 
 ## Coin sinks and pacing
 
-MVP ships one free starter cosmetic and at least one coin-priced item. Limited-beta price hypotheses:
+The current slice ships one free starter cosmetic. A later MVP/limited-beta candidate should
+add at least one earnable coin-priced item only after purchase/equip persistence and pacing
+tests. Price hypotheses:
 
 | Cosmetic category | Coin range | Target effort at 40–60 coins/match |
 | --- | ---: | --- |
@@ -169,11 +173,14 @@ Persist:
 - bounded integer coins and account XP; level is derived and is not persisted independently;
 - bounded integer matches played, wins, losses, and draws;
 - the newest 64 idempotent match-reward records, including stable key, amount, time, outcome,
-  and player/bot mode.
+  and player/bot mode;
+- a bounded dense owned-cosmetic list and one equipped cosmetic validated against enabled
+  definitions;
+- normalized music/SFX volume, camera-shake, reduced-effects, and UI-scale settings.
 
-Owned/equipped cosmetics, settings, receipts, tutorial grants, weapon mastery, quests, and
-season state are not in schema v1. They require explicit schema migrations when those systems
-ship.
+Receipts, tutorial grants, weapon mastery, quests, and season state are not in schema v2. They
+require explicit schema migrations when those systems ship. Music/SFX values are reserved but
+do not imply that audio playback/assets are implemented.
 
 Stable item IDs are never reused. A removed item remains recognized for ownership/migration.
 Unknown IDs are logged and quarantined rather than silently converted. Current match currency

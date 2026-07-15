@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 
 local BotConfig = require(ReplicatedStorage.Shared.Config.BotConfig)
 local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
+local ClientSettings = require(script.Parent.ClientSettings)
 
 local DEEP_TEAL = Color3.fromRGB(15, 107, 109)
 local WARM_CORAL = Color3.fromRGB(242, 107, 94)
@@ -72,10 +73,11 @@ local function addStroke(guiObject: GuiObject, color: Color3, thickness: number)
 	stroke.Parent = guiObject
 end
 
-local function addScale(guiObject: GuiObject, scaleValue: number)
+local function addScale(guiObject: GuiObject, scaleValue: number): UIScale
 	local scale = Instance.new("UIScale")
 	scale.Scale = scaleValue
 	scale.Parent = guiObject
+	return scale
 end
 
 local function createPanel(
@@ -199,6 +201,7 @@ function HUDController.create(initialIntent: Intent): Controller
 	end
 	local touchLayout = UserInputService.TouchEnabled
 	local topScale = if touchLayout then math.clamp((viewportWidth - 60) / 830, 0.62, 1) else 1
+	local accessibilityValue = ClientSettings.readLocal(localPlayer).uiScale
 
 	local localHealthPanel, localNameLabel, localHealthLabel, localHealthFill =
 		createHealthPanel(screenGui, "LocalHealth", UDim2.fromOffset(18, 18), Vector2.zero)
@@ -212,11 +215,9 @@ function HUDController.create(initialIntent: Intent): Controller
 		UDim2.fromOffset(330, 88),
 		Vector2.new(0.5, 0)
 	)
-	if touchLayout then
-		addScale(localHealthPanel, topScale)
-		addScale(opponentHealthPanel, topScale)
-		addScale(turnPanel, topScale)
-	end
+	local localHealthScale = addScale(localHealthPanel, topScale * accessibilityValue)
+	local opponentHealthScale = addScale(opponentHealthPanel, topScale * accessibilityValue)
+	local turnScale = addScale(turnPanel, topScale * accessibilityValue)
 	local phaseLabel = createLabel(
 		turnPanel,
 		"Phase",
@@ -272,12 +273,13 @@ function HUDController.create(initialIntent: Intent): Controller
 	local weaponPanel = createPanel(
 		screenGui,
 		"WeaponPanel",
-		if touchLayout then UDim2.new(0, 14, 1, -18) else UDim2.new(0.5, 0, 1, -20),
+		if touchLayout then UDim2.new(0.5, 0, 1, -154) else UDim2.new(0.5, 0, 1, -20),
 		if touchLayout
 			then UDim2.fromOffset(compactWeaponWidth, 126)
 			else UDim2.fromOffset(500, 126),
-		if touchLayout then Vector2.new(0, 1) else Vector2.new(0.5, 1)
+		Vector2.new(0.5, 1)
 	)
+	local weaponScale = addScale(weaponPanel, accessibilityValue)
 	local weaponLabel = createLabel(
 		weaponPanel,
 		"Weapon",
@@ -355,6 +357,19 @@ function HUDController.create(initialIntent: Intent): Controller
 	local destroyed = false
 	local healthRefreshElapsed = 1
 	local matchDisplayRefreshElapsed = MATCH_DISPLAY_INTERVAL
+	local connections: { RBXScriptConnection } = {}
+
+	local function updateLobbyVisibility()
+		screenGui.Enabled = localPlayer:GetAttribute("LobbyState") == "InMatch"
+	end
+
+	local function updateAccessibilityScale()
+		local nextScale = ClientSettings.readLocal(localPlayer).uiScale
+		localHealthScale.Scale = topScale * nextScale
+		opponentHealthScale.Scale = topScale * nextScale
+		turnScale.Scale = topScale * nextScale
+		weaponScale.Scale = nextScale
+	end
 
 	local function updateIntent()
 		local definition = Weapons.get(intent.weaponId)
@@ -484,6 +499,9 @@ function HUDController.create(initialIntent: Intent): Controller
 		if message ~= "" and Workspace:GetServerTimeNow() < messageExpiresAt then
 			statusLabel.Text = message
 			statusLabel.TextColor3 = WARM_CORAL
+		elseif canAct and UserInputService.GamepadEnabled and not UserInputService.TouchEnabled then
+			statusLabel.Text = "Right stick aim/power  //  L1/R1 weapon  //  R2 fire"
+			statusLabel.TextColor3 = MINT
 		elseif canAct then
 			statusLabel.Text = if UserInputService.TouchEnabled
 				then "Aim, set power, choose a weapon, then fire"
@@ -502,6 +520,15 @@ function HUDController.create(initialIntent: Intent): Controller
 
 	updateIntent()
 	updateHealth()
+	updateLobbyVisibility()
+	table.insert(
+		connections,
+		localPlayer:GetAttributeChangedSignal("LobbyState"):Connect(updateLobbyVisibility)
+	)
+	table.insert(
+		connections,
+		localPlayer:GetAttributeChangedSignal("ClientUIScale"):Connect(updateAccessibilityScale)
+	)
 
 	local heartbeatConnection = RunService.Heartbeat:Connect(function(deltaTime: number)
 		if destroyed then
@@ -546,6 +573,9 @@ function HUDController.create(initialIntent: Intent): Controller
 			end
 			destroyed = true
 			heartbeatConnection:Disconnect()
+			for _, connection in connections do
+				connection:Disconnect()
+			end
 			screenGui:Destroy()
 		end,
 	}

@@ -2,58 +2,65 @@
 
 ## Current development slice
 
-- The inspected owner place is unpublished; verified playtests currently use generated local
-  `.rbxlx` builds rather than a published Development place.
-- Static analysis, strict analysis, and both Rojo builds pass. The latest recorded Studio
-  TestEZ run completed with 56 passed, 0 failed, and 0 skipped; source contains 111 specs, so
-  the Phase 1/2 additions still need a user-run Studio rerun.
-- Phase 1 movement, grounding, physical bot collision, support-loss settling, projectile
+- The owner place is unpublished; playtests use generated local `.rbxlx` builds instead of a
+  published Development experience.
+- Current source contains **137 TestEZ specs**. The latest recorded Studio execution is still
+  the older **56 passed, 0 failed, 0 skipped** result, so Phase 1-4 additions require a fresh
+  user-run Studio execution before runtime acceptance.
+- Phase 1 movement, grounding, physical bot collision, support-loss settlement, projectile
   leases, roster-only damage, readiness recovery, and Results expiry are implemented, but
-  their final runtime/visual-feel signoff remains user-run validation.
-- Schema-v1 profiles, session leases, bounded retries/autosave/shutdown handling, read-only
-  fallback, idempotent coins/XP rewards, and profile/results presentation are implemented in
-  source, but their service/UI runtime path has not yet received Studio acceptance.
-- The unpublished Studio build deliberately uses process-local session memory. It cannot prove
-  cross-session persistence and balances may reset after Studio stop/start without indicating
-  a defect.
-- Native DataStore leave/rejoin, lease contention, retry, read-only recovery, autosave, and
-  BindToClose durability have not been run against a published Development place. Cloud data
-  safety therefore remains a release blocker even though the adapter and pure rules exist.
-- Published Studio synthetic users (`UserId <= 0`) intentionally remain on SessionMemory;
-  cloud acceptance requires an authenticated positive-UserId client showing
-  `CLOUD`/`Persistent` storage.
-- Schema v1 persists coins, XP, match statistics, and a bounded reward ledger only. Inventory,
-  owned/equipped cosmetics, settings, receipts, quests, mastery, and seasons are not yet
-  represented.
-- The processed-reward ledger retains 64 identities. That covers the ordered live match and
-  retry lifecycle, but it is not a permanent archive against manually replaying an identity
-  after 64 newer grants.
-- Orderly shutdown drains already-enqueued rewards for up to 25 seconds, but there is no
-  durable match-result outbox. An abrupt crash before the atomic profile grant begins can lose
-  that earned reward; durable recovery is still required before production claims.
-- Matchmaking, a dedicated lobby, cosmetics, and monetisation are not implemented.
-- Results expiry returns to the waiting scheduler because a dedicated lobby is not yet built.
-- Mobile controls require device testing and accessibility tuning.
-- Client fluidity has explicit trajectory, effects, HUD, and terrain-work bounds, but its
-  visual feel and representative-device performance have not been accepted. The current
-  16.65 ms p50 / 17.72 ms p95 / 18.04 ms p99 / 18.37 ms worst server snapshot is Studio-only
-  evidence.
-- Terrain replication has snapshot recovery, but predictive projectile visuals still need a
-  late-client state-recovery path.
-- The new squirrel rival, layered backdrop, and colour grade establish an original direction,
-  but they remain code-built programmer art rather than production character/environment
-  assets; silhouette, scale, palette, and readability need screenshot-driven iteration.
-- Hosted CI validates TestEZ source and the test-place build but cannot execute Studio runtime
-  tests without a Windows self-hosted runner.
+  final movement/camera/impact feel remains screenshot- and device-tested by the user.
+- Phase 3/4 lobby, loadout, settings, touch/gamepad input, Return to Camp, active-projectile
+  recovery, and telemetry are implemented in source but have not yet completed the integrated
+  Studio acceptance matrix in `NEXT_ACTIONS.md`.
+- Match admission is same-server and intentionally supports one active arena. It has no
+  MemoryStore cross-server queue, party reservation, teleport, reconnect-to-match, or
+  multi-arena scheduler. Practice is immediate when free; Casual pairs two humans in FIFO
+  order and otherwise bot-fills after about eight seconds.
+- The active-projectile snapshot recovers presentation for at most the one current launch. It
+  is not a general mid-match reconnection snapshot and never reconstructs an already-finished
+  impact.
+- Schema-v2 profiles, schema-v0/v1 migration, session leases, bounded retries/autosave/shutdown,
+  read-only fallback, rewards, starter equipment, and settings mutations are implemented, but
+  their native DataStore path has not been tested in a published Development place.
+- Unpublished Studio deliberately uses process-local SessionMemory. Coins, XP, statistics,
+  equipment, and settings may reset after Studio stop/start without indicating a persistence
+  defect. Published synthetic users (`UserId <= 0`) also remain on SessionMemory; cloud
+  evidence requires an authenticated positive-UserId client showing `CLOUD`/`Persistent`.
+- The processed-reward ledger retains 64 identities. That bounds profile size but is not a
+  permanent archive against a manually replayed identity after 64 newer grants.
+- Orderly shutdown drains already-enqueued work for up to 25 seconds, but there is no durable
+  match-result outbox. An abrupt server crash before the reward enqueue/atomic write can lose
+  that earned reward.
+- Music/SFX values are reserved and validated in schema v2, but original audio assets and an
+  audio playback controller are intentionally not shipped yet.
+- Development telemetry is an allowlisted structured Output/Workspace diagnostic sink only.
+  It is not connected to a Production analytics backend and has not completed scripted event
+  reconciliation in Studio.
+- Purchase receipt processing, paid products, catalog ownership grants, and monetization UI
+  are not implemented. No live SKU or Robux action is enabled.
+- Touch layouts and gamepad bindings are implemented, but representative phone/tablet and
+  hardware-controller testing is pending. Desktop Studio frame observations do not clear the
+  mobile performance gate.
+- Client work is cadence/count bounded, including reduced-effects budgets, but final visual
+  fluidity and a 20-match memory/instance soak still need representative-device evidence.
+- The squirrel rival, field camp, layered backdrop, scarf, icons, and interfaces are original
+  code-built programmer art. They still need screenshot-driven silhouette, typography,
+  palette, spacing, animation, and production-asset iteration.
+- Hosted CI validates source and builds the test place but cannot execute Roblox Studio
+  runtime tests without a Windows self-hosted runner.
 
 ## Release blockers
 
-- Select and clear a final public name.
-- Complete original production art, audio, and asset-licence review.
-- Complete the user-run 111-spec rerun and combined Phase 1 movement/support/bot/rematch plus
-  Phase 2 profile/reward presentation validation.
-- Complete owner-run published Development DataStore leave/rejoin, migration, duplicate
-  session, transient failure, autosave, and shutdown validation without using Production.
-- Complete multiplayer, exploit, mobile, performance, and rollback testing.
-- Publish only after the Creator Dashboard maturity questionnaire and tester permissions are
-  reviewed by the owner.
+- Select and clear a final public name; Project Critter Clash remains an internal codename.
+- Pass the current 137-spec Studio run and combined Phase 1-4 lobby/combat/profile/device
+  checklist with no blocker or critical error.
+- Pass published private Development schema-v2 migration, leave/rejoin, competing-session,
+  retry/read-only, autosave, PlayerRemoving, and shutdown validation without Production data.
+- Complete exploit, multiplayer/disconnect, representative mobile/gamepad, performance/soak,
+  telemetry-reconciliation, and rollback tests.
+- Complete original production art/audio and asset-provenance review.
+- Implement and stage-test durable receipt processing before enabling any paid product; live
+  commerce remains optional and owner-approved.
+- Publish only after the owner reviews tester permissions, content-maturity questionnaire,
+  release evidence, rollback target, and all Production configuration.

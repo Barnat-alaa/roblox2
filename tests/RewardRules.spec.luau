@@ -159,6 +159,30 @@ return function()
 			expect(#original.processedRewards).to.equal(0)
 		end)
 
+		it("preserves cosmetic ownership and comfort settings during a reward grant", function()
+			local original = ProfileRules.createDefault()
+			original.settings.reducedEffects = true
+			original.settings.cameraShake = 0
+			original.settings.uiScale = 1.2
+
+			local result, reason = RewardRules.applyMatchReward(
+				original,
+				context("identity-preserved", "win"),
+				1_700_000_002
+			)
+			assert(result ~= nil, reason)
+
+			expect(result.profile.inventory.equippedCosmetic).to.equal(
+				original.inventory.equippedCosmetic
+			)
+			expect(result.profile.inventory.ownedCosmetics[1]).to.equal(
+				original.inventory.ownedCosmetics[1]
+			)
+			expect(result.profile.settings.reducedEffects).to.equal(true)
+			expect(result.profile.settings.cameraShake).to.equal(0)
+			expect(result.profile.settings.uiScale).to.equal(1.2)
+		end)
+
 		it("returns Duplicate with the original grant and no second mutation", function()
 			local request = context("duplicate", "draw")
 			local first = RewardRules.applyMatchReward(ProfileRules.createDefault(), request, 10)
