@@ -27,8 +27,8 @@ Project Critter Clash is a temporary internal codename. This plan targets an ori
 
 ## Implementation checkpoint — 2026-07-15
 
-The authoritative 1v1 loop, solo bot, and Phase 1 combat-correctness code are implemented in
-the local `0.4.0-dev` Development build:
+The authoritative 1v1 loop, solo bot, Phase 1 combat correctness, and Phase 2 progression
+foundation are implemented in the local `0.5.0-dev` Development build:
 
 - movement is turn-token and sequence scoped, speed/arena/plane constrained, and charged by
   cumulative path distance with bounded grounded jumps;
@@ -37,19 +37,30 @@ the local `0.4.0-dev` Development build:
 - explosion damage is restricted to the current roster, projectile finalization is leased to
   the exact match resolution, and readiness/results waits have bounded recovery;
 - client and server high-frequency work remains cadence- or count-bounded;
-- source contains 71 TestEZ specs, and format, lint, strict analysis, plus both Rojo builds
-  pass locally;
-- the latest recorded Studio TestEZ execution remains the earlier 56-pass run. Phase 1 physics,
-  all 71 current specs, bot rematch, and visual feel remain user-run acceptance work.
+- schema-v1 profiles validate bounded integer coins, XP, win/loss/draw statistics, and a
+  bounded 64-entry processed-reward ledger; account level is derived from XP and schema v0
+  profiles have a strict migration path;
+- Development persistence uses UpdateAsync session leases, bounded retries, autosave,
+  shutdown draining, and explicit read-only/unavailable states; unpublished Studio selects a
+  deliberate process-local session-memory adapter with no cross-session persistence;
+- result rewards are server-derived and applied atomically with their ledger entry. Stable
+  grant IDs include environment, match, and player identity but deliberately exclude economy
+  version, so retuning cannot regrant an already processed match;
+- profile status/balances/derived level and pending/resolved reward feedback are presented by
+  the client without accepting client-authored currency values;
+- source contains 111 TestEZ specs. The latest recorded Studio TestEZ execution remains the
+  earlier 56-pass run, so Phase 1 physics/feel and the Phase 2 runtime path still require
+  user-run acceptance. Published Development DataStore behavior has not been validated.
 
-**Immediate acceptance step:** run the 71-spec suite and the focused movement/support/bot
-checklist in `NEXT_ACTIONS.md`, then return screenshots or a feel description.
+**Immediate acceptance step:** run the 111-spec suite and the combined movement/support/bot,
+profile, and result-reward checklist in `NEXT_ACTIONS.md`, then return screenshots or a feel
+description. The unpublished place can verify the session-memory path only; cloud persistence
+requires an owner-run published Development-place test.
 
-**Next implementation milestone after acceptance:** Phase 2 / M5.4 session-safe profiles,
-migrations, autosave and shutdown behavior, followed by idempotent result-based coins/XP.
-Then continue late-projectile recovery, mobile/accessibility, lobby/cosmetics/audio/analytics,
-and private publication only with owner approval. No Development or Production place has been
-published.
+**Next implementation milestone after acceptance:** add the compact lobby and one free
+original cosmetic with validated ownership/equip persistence. Then continue late-projectile
+recovery, mobile/accessibility, audio/analytics, and private publication only with owner
+approval. No Development or Production place has been published.
 
 ## Seven-day private MVP
 
@@ -105,10 +116,11 @@ The critical path is repository and Studio sync → combat plane → turn author
 | --- | --- | --- | --- | --- | --- |
 | M5.1 | Configure Fizzy Bomb and Bubble Bouncer with fuse/bounce limits, completing four original weapons | M3.1, M4.3 | 1.5 h / GD, ENG | Each weapon has a distinct legal trajectory and readable role; all terminate within lifetime bounds | Ship two polished weapons and show the other two as unavailable previews |
 | M5.2 | **IMPLEMENTED; USER VALIDATION PENDING:** an imperfect bot selects a target, solves a bounded shot with difficulty error, and uses normal fire validation | M3.2 | 1.5 h / ENG, GD | Bot fires before timeout and can finish/rematch a match without hidden damage or perfect information; final-tuning runtime signoff remains open | Bot uses Acorn Cannon/Mole Drill through a bounded deterministic search |
-| M5.3 | **PARTIAL:** Results and immediate rematch are complete; retain the stable result identity needed for a later exactly-once coins/XP grant | M3.4 | 1 h / DATA, UI | Win/loss is clear; rematch begins cleanly; repeated result calls resolve once | Keep rewards disabled until profiles are writable |
-| M5.4 | Add versioned profile load/save, session lease, retry/autosave, shutdown handling, and environment-specific store names; then complete the idempotent reward grant | M5.3 result identity | 2 h / DATA, NET | Leave/rejoin retains test progression; repeated result keys grant once; concurrent session and migration tests are safe; failure never overwrites with defaults | Save coins, XP, one equipped cosmetic, and receipt/reward IDs only; disable rewards if the profile is not writable |
+| M5.3 | **IMPLEMENTED; RUNTIME ACCEPTANCE PENDING:** Results/rematch use unique session-scoped match identities and enqueue server-derived, idempotent coins/XP grants before Results replication; profile and Results UI show pending/resolved status | M3.4 | 1 h / DATA, UI | Win/loss and reward are clear; rematch begins cleanly; reachable result/retry calls resolve once within the retained ledger | Disable a grant when its profile is not safely writable |
+| M5.4 | **IMPLEMENTED; PUBLISHED DEVELOPMENT VALIDATION PENDING:** schema-v1 profile validation, schema-v0 migration, session leases, bounded retry/autosave/shutdown behavior, read-only failure handling, and a 64-entry reward ledger | M5.3 result identity | 2 h / DATA, NET | Current 111-spec source covers pure profile/reward/session rules; owner-run published Development tests must still prove leave/rejoin, concurrent session, retry, and shutdown behavior against DataStoreService | Unpublished Studio uses session memory; keep rewards disabled for read-only/unavailable profiles |
 
-**Day 5 gate:** a new player can finish and rematch a bot match, then rejoin with rewards intact.
+**Day 5 gate:** pending owner-run published Development proof that a new player can finish and
+rematch a bot match, then rejoin with rewards intact.
 
 ### Day 6 — lobby, cosmetic, polish, and instrumentation
 

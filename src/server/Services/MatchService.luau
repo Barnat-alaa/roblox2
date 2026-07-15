@@ -1,16 +1,19 @@
 --!strict
 
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local BotConfig = require(ReplicatedStorage.Shared.Config.BotConfig)
+local EconomyConfig = require(ReplicatedStorage.Shared.Config.EconomyConfig)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local MatchRules = require(ReplicatedStorage.Shared.Simulation.MatchRules)
 local Wind = require(ReplicatedStorage.Shared.Simulation.Wind)
 
 local ArenaService = require(script.Parent.ArenaService)
 local CharacterService = require(script.Parent.CharacterService)
+local EconomyService = require(script.Parent.EconomyService)
 local NetworkService = require(script.Parent.NetworkService)
 local TerrainService = require(script.Parent.TerrainService)
 
@@ -33,6 +36,8 @@ type ParticipantRecord = {
 	displayName: string,
 	isNpc: boolean,
 	eliminated: boolean,
+	abandoned: boolean,
+	legalTurnsCompleted: number,
 	player: Player?,
 	model: Model?,
 }
@@ -50,6 +55,7 @@ type ResultPayload = {
 	isDraw: boolean,
 	reason: string,
 	participants: { ResultParticipant },
+	rewards: { EconomyService.ResultReward },
 	serverTime: number,
 	expiresAt: number,
 }
@@ -82,6 +88,9 @@ local TURN_END_SECONDS = 0.55
 local CHARACTER_READY_RETRY_SECONDS = 0.25
 local MATCH_EVENT_TIME_STEP = 1e-6
 local REMATCH_RATE_LIMIT_SECONDS = 0.2
+local SERVER_SESSION_IDENTITY = if game.JobId ~= ""
+	then game.JobId
+	else "studio-" .. HttpService:GenerateGUID(false)
 
 local MatchService = {}
 
@@ -94,6 +103,7 @@ local roundNumber = 0
 local lastActorUserId: number? = nil
 local lastActorWasNpc = false
 local currentWind = 0
+local matchStartedAt = 0
 local transitionToken = 0
 local matchSequence = 0
 local currentMatchId = ""
@@ -134,8 +144,7 @@ end
 
 local function newMatchId(): string
 	matchSequence += 1
-	local serverIdentity = if game.JobId ~= "" then game.JobId else "studio"
-	local matchId = string.format("%s-%d", serverIdentity, matchSequence)
+	local matchId = string.format("%s-%d", SERVER_SESSION_IDENTITY, matchSequence)
 	assert(MatchRules.isValidMatchId(matchId), "generated match ID must satisfy network bounds")
 	return matchId
 end
@@ -249,6 +258,51 @@ local function resultParticipants(): { ResultParticipant }
 	return result
 end
 
+local function completionSnapshot(
+	outcome: Outcome,
+	finalReason: string,
+	completedAt: number
+): EconomyService.MatchCompletion
+	local mode: EconomyService.MatchMode = "player"
+	for _, participant in participants do
+		if participant.isNpc then
+			mode = "bot"
+			break
+		end
+	end
+
+	local completionParticipants: { EconomyService.CompletionParticipant } =
+		table.create(#participants)
+	for index, participant in participants do
+		local participantOutcome: EconomyService.ParticipantOutcome = if outcome.isDraw
+			then "draw"
+			else if participant.userId == outcome.winnerUserId then "win" else "loss"
+		completionParticipants[index] = table.freeze({
+			player = participant.player,
+			userId = participant.userId,
+			isNpc = participant.isNpc,
+			eliminated = participant.eliminated,
+			abandoned = participant.abandoned,
+			legalTurnsCompleted = participant.legalTurnsCompleted,
+			outcome = participantOutcome,
+		}) :: EconomyService.CompletionParticipant
+	end
+
+	return table.freeze({
+		schemaVersion = 1,
+		resultId = currentMatchId,
+		matchId = currentMatchId,
+		mode = mode,
+		startedAt = matchStartedAt,
+		completedAt = completedAt,
+		winnerUserId = outcome.winnerUserId,
+		isDraw = outcome.isDraw,
+		reason = finalReason,
+		economyVersion = EconomyConfig.version,
+		participants = table.freeze(completionParticipants),
+	}) :: EconomyService.MatchCompletion
+end
+
 local function rematchStatusPayload()
 	local required = requiredHumanUserIds()
 	return {
@@ -312,16 +366,40 @@ local function enterResults(outcome: Outcome, reasonOverride: string?)
 		then "disconnect"
 		else outcome.reason
 	resultExpiresAt = Workspace:GetServerTimeNow() + GameConfig.resultsDurationSeconds
+	local completedAt = nextMatchEventTime()
 	local payload: ResultPayload = {
 		matchId = currentMatchId,
 		winnerUserId = outcome.winnerUserId,
 		isDraw = outcome.isDraw,
 		reason = finalReason,
 		participants = resultParticipants(),
-		serverTime = nextMatchEventTime(),
+		rewards = {},
+		serverTime = completedAt,
 		expiresAt = resultExpiresAt,
 	}
+	-- Reserve this exact result synchronously before dispatching any asynchronous
+	-- profile work. Repeated death/disconnect callbacks can no longer enqueue a
+	-- second logical reward for the same match.
 	resultPayload = payload
+	local completion = completionSnapshot(outcome, finalReason, completedAt)
+	local rewardsQueued, queuedRewards = pcall(EconomyService.enqueueMatchCompletion, completion)
+	if rewardsQueued then
+		payload.rewards = queuedRewards :: { EconomyService.ResultReward }
+	else
+		warn(string.format("[CritterClash] Reward enqueue failed: %s", tostring(queuedRewards)))
+		local unavailableRewards: { EconomyService.ResultReward } = {}
+		for _, participant in completion.participants do
+			if not participant.isNpc then
+				table.insert(unavailableRewards, {
+					userId = participant.userId,
+					status = "Unavailable",
+					coins = 0,
+					experience = 0,
+				})
+			end
+		end
+		payload.rewards = unavailableRewards
+	end
 	resultEmissionCount += 1
 	Workspace:SetAttribute("CritterClashWinnerUserId", outcome.winnerUserId)
 	Workspace:SetAttribute("CritterClashResultIsDraw", outcome.isDraw)
@@ -770,6 +848,7 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 	transitionToken += 1
 	currentMatchId = suppliedMatchId or newMatchId()
 	assert(MatchRules.isValidMatchId(currentMatchId), "match ID must satisfy network bounds")
+	matchStartedAt = Workspace:GetServerTimeNow()
 	resultPayload = nil
 	resultExpiresAt = 0
 	table.clear(readyByUserId)
@@ -805,6 +884,8 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 			displayName = player.DisplayName,
 			isNpc = false,
 			eliminated = false,
+			abandoned = false,
+			legalTurnsCompleted = 0,
 			player = player,
 			model = nil,
 		}
@@ -818,6 +899,8 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 			displayName = if humanoid then humanoid.DisplayName else BotConfig.displayName,
 			isNpc = true,
 			eliminated = false,
+			abandoned = false,
+			legalTurnsCompleted = 0,
 			player = nil,
 			model = target,
 		}
@@ -873,6 +956,7 @@ enterWaitingState = function()
 	lastActorWasNpc = false
 	currentWind = 0
 	currentMatchId = ""
+	matchStartedAt = 0
 	resultExpiresAt = 0
 	characterReadyDeadline = 0
 	Workspace:SetAttribute("CritterClashWinnerUserId", nil)
@@ -1130,6 +1214,7 @@ function MatchService.start(networkRemotes: Remotes, matchArena: Model)
 		local participant = participantByUserId[player.UserId]
 		if participant and participant.player == player and currentMatchId ~= "" then
 			if phase ~= "Results" then
+				participant.abandoned = true
 				eliminateParticipant(participant, "disconnect", currentMatchId)
 			end
 		end
@@ -1223,6 +1308,10 @@ function MatchService.canMove(
 end
 
 local function enterProjectileResolution(): ProjectileLease
+	local participant = activeParticipant
+	if participant then
+		participant.legalTurnsCompleted += 1
+	end
 	transitionToken += 1
 	phase = "ProjectileResolving"
 	deadline = 0

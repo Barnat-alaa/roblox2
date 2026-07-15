@@ -11,6 +11,17 @@
 
 All values below are explicit test hypotheses. Change them through versioned configuration and record the effective version in analytics.
 
+## Phase 2 implementation checkpoint
+
+Economy configuration version 1, reward eligibility/calculation, schema-v1 profiles, and the
+idempotent retained-ledger match-grant path are implemented in source. Current source has pure coverage, but
+the latest recorded Studio suite remains the earlier 56-pass run and cloud persistence has not
+been validated in a published Development place.
+
+The current profile persists bounded integer coins, XP, win/loss/draw statistics, and a dense
+64-entry processed-reward ledger. Level is derived from XP. Unpublished Studio uses explicit
+process-local session memory, so balances are not expected to survive Studio stop/start.
+
 ## Fairness invariants
 
 - Normal weapons, ammunition, health, damage, accuracy, wind response, movement, and competitive loadouts are never sold for Robux.
@@ -41,7 +52,9 @@ Premium cosmetic currency and Season XP are not visible in the seven-day MVP. Ad
 | Player-versus-bot multiplier after tutorial | 0.85 | 0.85 |
 | Abandonment/AFK | 0 | 0 |
 
-Rounding is deterministic on the server. A short legitimate win still qualifies. An ordinary loss should not feel wasted.
+Rounding is deterministic on the server; the current bot multiplier uses integer
+multiplication followed by floor. A short legitimate win still qualifies. An ordinary loss
+should not feel wasted.
 
 ### Eligibility
 
@@ -51,15 +64,24 @@ A match reward is eligible when the server records a valid MatchEnd and the part
 - was eliminated after participating in a legal turn;
 - won a legitimate short match.
 
-Tutorial rewards are keyed separately and granted once. Network loss is handled through the documented abandonment/reconnect policy; the client never chooses eligibility or amount.
+Abandonment and disconnect are explicitly ineligible. Tutorial rewards will be keyed
+separately when implemented. The client never chooses eligibility or amount.
 
 ### Idempotency
 
-Every grant uses a stable key containing environment, reward version, match or tutorial identity, player identity, and grant type. The profile stores/records the key before exposing the new balance through the same safe update path. Repeated Results events, reconnects, retries, and server shutdown cannot grant twice.
+Every current match grant uses a stable key containing environment, match identity, player
+identity, and grant type. It deliberately excludes economy/reward version: changing a balance
+table must not make an already processed match payable again. Coins, XP, outcome statistics,
+economy version, and the processed entry are committed through one atomic profile update.
+Duplicate attempts return the original recorded grant without another balance/stat mutation.
+The ledger retains the newest 64 entries, covering every identity reachable through the
+ordered live match/retry lifecycle. It is not a permanent replay archive after eviction.
+Published Development retry/reconnect/shutdown behavior still requires owner-run cloud
+validation, and abrupt pre-enqueue crash recovery needs a durable outbox before production.
 
 ## Account levels
 
-Initial threshold hypothesis for the XP needed from level L to L+1:
+Implemented threshold for the XP needed from level L to L+1, capped at level 100:
 
 **150 + 50 × (L − 1)**, with a configured cap and later curve review.
 
@@ -144,14 +166,19 @@ No player-to-player trading or gifting is planned initially; these add fraud, sc
 Persist:
 
 - schema and economy configuration version;
-- integer coins, account XP, and level;
-- owned/equipped cosmetic stable IDs;
-- completed one-time grant IDs;
-- bounded/idempotent match reward and purchase ledger data;
-- weapon mastery/quest/season state only when those systems ship;
-- aggregate match statistics needed for progression.
+- bounded integer coins and account XP; level is derived and is not persisted independently;
+- bounded integer matches played, wins, losses, and draws;
+- the newest 64 idempotent match-reward records, including stable key, amount, time, outcome,
+  and player/bot mode.
 
-Stable item IDs are never reused. A removed item remains recognized for ownership/migration. Unknown IDs are logged and quarantined rather than silently converted. Currency mutation is exposed only through a server EconomyService with reason code, source ID, before/after value, and correlation ID.
+Owned/equipped cosmetics, settings, receipts, tutorial grants, weapon mastery, quests, and
+season state are not in schema v1. They require explicit schema migrations when those systems
+ship.
+
+Stable item IDs are never reused. A removed item remains recognized for ownership/migration.
+Unknown IDs are logged and quarantined rather than silently converted. Current match currency
+mutation is exposed only through the server EconomyService/DataService path. Future general
+currency operations must add reason code, source ID, before/after value, and correlation ID.
 
 ## Economy telemetry
 

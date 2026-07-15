@@ -10,8 +10,8 @@ relationship with another game are prohibited.
 
 ## Current development slice
 
-The repository contains the server-authoritative combat, terrain, and complete 1v1 match-loop
-foundation:
+The repository contains the server-authoritative combat, terrain, complete 1v1 match loop,
+and first progression foundation:
 
 - deterministic shared ballistics, wind, weapon, and damage rules;
 - a server-owned turn/fire boundary with request validation;
@@ -34,26 +34,39 @@ foundation:
 - persistent elimination state that remains authoritative across Roblox character respawns;
 - one authoritative match result, a Results interface, unanimous human rematch consent, and
   a fresh-match reset of terrain, bot, characters, wind, turns, and timers;
+- a strict schema-v1 profile containing bounded integer coins, XP, match statistics, and a
+  64-entry processed-reward ledger, including safe schema-v0 migration and server-derived
+  account levels;
+- a Development-only persistence adapter with UpdateAsync session leases, bounded retries,
+  autosave, shutdown draining, and explicit read-only/unavailable states; unpublished Studio
+  uses an explicit process-local session-memory adapter and therefore does not persist across
+  Studio sessions;
+- server-calculated, idempotent result rewards with stable environment/match/player grant
+  identities, plus replicated profile status, balances, levels, and reward feedback in the
+  HUD and Results interface; the 64-entry ledger covers reachable live retries, not arbitrary
+  replay after an identity has been evicted;
 - a side-view client camera, aim controls, trajectory preview, and combat HUD;
 - an original code-built red-squirrel rival, layered hill/cloud/sun backdrop, and restrained
   atmosphere, bloom, and colour grading as the first low-cost visual-direction pass;
 - bounded client fluidity work: no 97-point trajectory allocation, at most 48 preview
   raycasts per rebuild, 16 effect catch-up steps per frame, a 10 Hz HUD cadence, and one
   terrain chunk rebuild per Heartbeat;
-- 71 TestEZ specs in source, lint/format configuration, and reproducible Rojo builds;
+- 111 TestEZ specs in source, lint/format configuration, and reproducible Rojo builds;
 - a CI workflow with pinned tooling, build validation, and a basic secret scan.
 
 Static analysis, strict analysis, and both Rojo builds are clean. The latest recorded Studio
-TestEZ run reports **56 passed, 0 failed, 0 skipped**; source now contains 71 specs, so the
-Phase 1 additions still need a user-run Studio rerun. A live pre-Phase-1 bot match
+TestEZ run reports **56 passed, 0 failed, 0 skipped**; source now contains 111 specs, so the
+Phase 1 and Phase 2 additions still need a user-run Studio rerun. A live pre-Phase-1 bot match
 verified authoritative bot firing, human elimination, and the DEFEAT Results flow. Final bot
 rematch plus movement/support/runtime-feel validation remain user-run acceptance work. In Studio, bot
 aim solving was observed at 3.43-5.65 ms, while a server snapshot measured 16.65 ms p50,
 17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. These are development observations,
-not production or representative-device guarantees. After Phase 1 runtime acceptance, the
-next implementation milestone is session-safe profiles and idempotent match rewards.
+not production or representative-device guarantees. Phase 2 persistence and reward code has
+not yet been validated against Roblox cloud DataStoreService: that requires an owner-run,
+published Development-place test. The immediate milestone is combined Phase 1/2 Studio
+acceptance; the next code milestone is a compact lobby and one free original cosmetic.
 
-The current Development build identifies itself as `0.4.0-dev`. Character and environment
+The current Development build identifies itself as `0.5.0-dev`. Character and environment
 art remain editable programmer-art foundations; screenshot feedback will drive the next
 silhouette, palette, scale, and readability pass before any production asset work.
 
@@ -115,7 +128,7 @@ Mobile-safe controls are rendered by the client, but real-device tuning is still
 
 - All important Luau modules use `--!strict`.
 - The server owns turns, shot origins, projectile collision, damage, and terrain mutations.
-- Future rewards must also be server-authoritative.
+- Rewards and balance changes are server-authoritative.
 - Clients never report hits or damage.
 - No secrets, private keys, ripped assets, or unreviewed third-party assets may be committed.
 - Production publication and production data changes require explicit approval.

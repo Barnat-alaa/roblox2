@@ -23,7 +23,7 @@ Core invariants:
 | Camera | Client custom side camera with overview, actor focus, projectile follow, impact, and result modes | Presentation stays responsive without affecting authority |
 | Network | Narrow validated intent remotes and server event snapshots | Keeps attack surface reviewable; no client damage/hit/result messages |
 | Bot | Server bot that submits legal aim/fire intent through the player rules | No cheat-only combat path; later add terrain-aware search |
-| Data | Native DataStoreService behind a DataService adapter with UpdateAsync lease, retries, migrations, and idempotency ledgers | Small MVP schema and zero unreviewed runtime dependency; a reviewed pinned profile library may replace the adapter later |
+| Data | Native DataStoreService behind a DataService adapter with UpdateAsync lease, retries, migrations, and idempotency ledgers; unpublished Studio explicitly uses process-local session memory | Small MVP schema and zero unreviewed runtime dependency; a reviewed pinned profile library may replace the adapter later |
 | UI | Roblox GuiObjects plus a small explicit state/view layer | Low setup cost and easy mobile profiling; evaluate React Luau only if UI complexity justifies it |
 | Matchmaking | Same-server queue, then bot fill after a short wait | Works without launch population; later MemoryStore and reserved servers |
 | Environments | runtime config plus distinct place/universe identifiers and data prefixes | Prevents test data or debug features leaking to production |
@@ -48,8 +48,12 @@ Core invariants:
 - CharacterService: spawn, plane constraint, movement validation, death/recovery.
 - BotService: target/weapon selection, imperfect aim search, and legal action timing.
 - QueueService: same-server queue, bot deadline, cancellation, and rematch.
-- DataService: profile session, migration, autosave, shutdown, read-only/failure state.
-- Economy/MonetizationService: validated grants, ownership, equip, receipt processing.
+- DataService: implemented profile session, schema migration, ordered operations, autosave,
+  shutdown, and read-only/failure state; cloud behavior still needs published Development
+  validation.
+- EconomyService: implemented authoritative MatchEnd eligibility, reward calculation, and
+  idempotent retained-ledger grant enqueue. Ownership, equip, receipt processing, and a
+  durable crash-recovery outbox remain later work.
 - Analytics/SecurityService: schema-safe events, rate limits, anomaly counters, redacted logs.
 
 ### Client
@@ -60,6 +64,8 @@ Core invariants:
 - UIController renders server state and local selection without deciding outcomes.
 - Effects/Audio controllers pool transient presentation and respect reduced-effects settings.
 - Tutorial/Shop controllers request validated progress/equipment/purchase actions.
+- ProfileController reads server-owned profile attributes and renders storage/status, balance,
+  XP, and derived level; ResultsController presents pending/resolved reward feedback.
 
 ## Match state machine
 
@@ -78,7 +84,7 @@ Every transition checks the current state and transition token. Only the server 
 | ProjectileResolving | simulate one accepted shot | impact/fuse/lifetime | force expire by max lifetime |
 | EnvironmentalResolution | apply damage/terrain and settle | stable or settle timeout | clamp/recover/kill-plane |
 | TurnEnd | check eliminations and cleanup | next turn or match end | transition exactly once |
-| Results | persist exactly-once reward and offer rematch | rematch/lobby/expiry | no duplicate grant |
+| Results | enqueue an idempotent reward and offer rematch | rematch/lobby/expiry | no duplicate reachable retry; abrupt pre-enqueue crash remains documented |
 
 Invariants include one active actor, one accepted shot per turn, one effect application per impact ID, no turn advance while unresolved damage is pending, and bounded state duration.
 
@@ -154,7 +160,8 @@ All payloads have strict type/size checks, finite-number checks, match membershi
 | S→C | MatchSnapshot | state, participants, timer deadline, wind, revisions | server-originated snapshot |
 | S→C | ProjectileEvent | event, shot/impact ID, definition ID, seed, position/velocity/time | presentation only |
 | S→C | TerrainDelta | map/chunk revision, changed cells | revision-checked application |
-| S→C | ProfileView | permitted progression/equipment/settings | excludes leases, receipt ledger, internal risk data |
+| S→C | Player profile attributes | storage/status, coins, XP, derived level/progress | server-owned view; excludes lease and processed-reward ledger |
+| S→C | RewardResolved | match ID, status, granted coins/XP, server time | presentation only; client cannot request or alter a grant |
 
 No remote accepts target Instance, damage, health, reward amount, hit position, shot origin, terrain cells, receipt status, or match winner from a client.
 
@@ -176,21 +183,36 @@ Search has a time/candidate cap. If no candidate is found, it fires a conservati
 
 ### MVP profile
 
-- schemaVersion, level, experience, coins.
-- owned/equipped cosmetic IDs.
-- minimal weapon mastery/statistics if implemented.
-- settings.
-- processed reward/receipt IDs with bounded retention or durable ledger strategy.
+- Current schema v1 stores schema/economy version, bounded integer coins and XP, integer
+  matches/wins/losses/draws, and a dense processed-match-reward ledger capped at 64 entries.
+- Level is derived from XP with `150 + 50 x (level - 1)` per next level and a level-100 cap;
+  it is not a second persisted source of truth.
+- Each reward entry stores its stable key, coins, XP, grant time, outcome, and player/bot mode.
+- Missing data receives the explicit starter profile. Schema v0 accepts bounded coins plus
+  exactly one of `xp` or legacy `experience`; corrupt, ambiguous, unsupported, and future
+  schemas fail safely.
+- Owned/equipped cosmetics, settings, receipts, mastery, quests, and seasons are not part of
+  schema v1 and require reviewed migrations when implemented.
 
 ### Session and write behavior
 
-- Store prefixes: DEV_CritterClash_Profile_v1, STAGING_CritterClash_Profile_v1, and PROD_CritterClash_Profile_v1.
-- Acquire a lease with UpdateAsync containing server job ID and timestamp; renew on autosave.
-- Retry transient failures with bounded exponential backoff and jitter.
-- Autosave about every 60 seconds with budget awareness, plus PlayerRemoving and BindToClose.
+- The only active configuration is Development store `DEV_CritterClash_Profile_v1` with
+  `Player_` keys. Staging and Production require separate reviewed place/configuration work.
+- Acquire a 120-second lease with UpdateAsync containing a unique server owner and timestamp;
+  renew on autosave and release after the profile operation queue drains.
+- Retry transient failures up to five attempts with bounded exponential backoff, jitter, and
+  DataStore request-budget waits.
+- Autosave every 45 seconds plus bounded jitter, with PlayerRemoving release and a bounded
+  25-second BindToClose drain.
 - Migrations are ordered, pure where possible, version-tested, and applied before the profile is writable.
 - If a safe writable session cannot be acquired, enter read-only/no-reward mode or deny progression play; never overwrite with defaults.
-- Grant operations carry stable idempotency keys. A match reward key is derived from match/player/reward version; a commerce key uses the platform purchase identity.
+- Grant operations carry stable idempotency keys. A match reward key is derived from
+  environment, match, and player identity and deliberately excludes economy/reward version;
+  changing reward configuration must not regrant the same completion. A future commerce key
+  uses the platform purchase identity.
+- In an unpublished Studio place, DataService deliberately selects a process-local
+  session-memory adapter. This is useful for integration tests but has no cross-session or
+  cross-server durability and is never described as a cloud persistence pass.
 - Production migrations require backup/snapshot, staging rehearsal, explicit owner approval, and rollback/forward-fix plan.
 
 The DataService interface isolates callers from the storage implementation so a reviewed and pinned profile library can be adopted later without changing game systems.
@@ -198,6 +220,9 @@ The DataService interface isolates callers from the storage implementation so a 
 ## Economy and purchase processing
 
 - Server derives rewards from verified match/quest state and configured tables.
+- Current MatchEnd grants atomically update coins, XP, outcome statistics, economy version,
+  and the processed-reward ledger. Duplicate keys return the original recorded grant without
+  changing balances or statistics.
 - Ownership/equipment is checked on every request and load; unknown IDs are quarantined/logged.
 - Durable cosmetic and repeatable product types have separate product definitions.
 - Receipt processing is the sole grant authority for receipt-based purchases; prompt completion is UI feedback, not proof of payment.

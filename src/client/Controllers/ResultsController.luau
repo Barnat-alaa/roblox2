@@ -13,6 +13,31 @@ local CLOSED_MATCH_HISTORY = 16
 local REQUEST_COOLDOWN_SECONDS = 0.2
 local WARNING_INTERVAL_SECONDS = 2
 
+local REWARD_STATUS: { [string]: boolean } = {
+	Pending = true,
+	Granted = true,
+	Duplicate = true,
+	Ineligible = true,
+	ReadOnly = true,
+	Unavailable = true,
+}
+
+local REWARD_ENTRY_KEYS: { [string]: boolean } = {
+	userId = true,
+	status = true,
+	coins = true,
+	experience = true,
+}
+
+local REWARD_RESOLVED_KEYS: { [string]: boolean } = {
+	matchId = true,
+	userId = true,
+	status = true,
+	coins = true,
+	experience = true,
+	serverTime = true,
+}
+
 local DEEP_TEAL = Color3.fromRGB(15, 107, 109)
 local WARM_CORAL = Color3.fromRGB(242, 107, 94)
 local CREAM = Color3.fromRGB(255, 241, 213)
@@ -30,12 +55,25 @@ type Participant = {
 	isNpc: boolean,
 }
 
+type RewardEntry = {
+	userId: number,
+	status: string,
+	coins: number,
+	experience: number,
+}
+
 type ResultPayload = {
 	matchId: string,
 	winnerUserId: number,
 	isDraw: boolean,
 	reason: string,
 	participants: { Participant },
+	rewards: { RewardEntry },
+	serverTime: number,
+}
+
+type RewardResolvedPayload = RewardEntry & {
+	matchId: string,
 	serverTime: number,
 }
 
@@ -117,6 +155,85 @@ local function boundedString(value: any, maximumBytes: number, allowEmpty: boole
 	return value
 end
 
+local function hasExactKeys(
+	source: NetworkTable,
+	allowedKeys: { [string]: boolean },
+	expectedCount: number
+): boolean
+	local count = 0
+	for rawKey in source do
+		if type(rawKey) ~= "string" or not allowedKeys[rawKey] then
+			return false
+		end
+		count += 1
+		if count > expectedCount then
+			return false
+		end
+	end
+	return count == expectedCount
+end
+
+local function parseRewardEntry(value: any): RewardEntry?
+	local source = asTable(value)
+	if not source or not hasExactKeys(source, REWARD_ENTRY_KEYS, 4) then
+		return nil
+	end
+
+	local userId = safeInteger(source.userId)
+	local status = source.status
+	local coins = safeInteger(source.coins)
+	local experience = safeInteger(source.experience)
+	if
+		userId == nil
+		or type(status) ~= "string"
+		or not REWARD_STATUS[status]
+		or coins == nil
+		or coins < 0
+		or experience == nil
+		or experience < 0
+	then
+		return nil
+	end
+
+	return {
+		userId = userId,
+		status = status,
+		coins = coins,
+		experience = experience,
+	}
+end
+
+local function parseRewards(value: any): { RewardEntry }?
+	local source = asTable(value)
+	if not source then
+		return nil
+	end
+
+	local rewards: { RewardEntry } = {}
+	local seenUserIds: { [number]: boolean } = {}
+	local entryCount = 0
+	for rawArrayIndex, rawReward in source do
+		local arrayIndex = safeInteger(rawArrayIndex)
+		local reward = parseRewardEntry(rawReward)
+		if
+			arrayIndex == nil
+			or arrayIndex < 1
+			or arrayIndex > MAX_PARTICIPANTS
+			or reward == nil
+			or seenUserIds[reward.userId]
+		then
+			return nil
+		end
+		seenUserIds[reward.userId] = true
+		entryCount += 1
+		rewards[arrayIndex] = reward
+	end
+	if entryCount ~= #rewards then
+		return nil
+	end
+	return rewards
+end
+
 local function parseParticipants(value: any): { Participant }?
 	local source = asTable(value)
 	if not source then
@@ -179,6 +296,7 @@ local function parseResult(value: any): ResultPayload?
 	local isDraw = payload.isDraw
 	local reason = boundedString(payload.reason, MAX_REASON_BYTES, true)
 	local participants = parseParticipants(payload.participants)
+	local rewards = parseRewards(payload.rewards)
 	local serverTime = finiteNumber(payload.serverTime)
 	if
 		not matchId
@@ -186,6 +304,7 @@ local function parseResult(value: any): ResultPayload?
 		or type(isDraw) ~= "boolean"
 		or not reason
 		or not participants
+		or not rewards
 		or not serverTime
 		or serverTime < 0
 	then
@@ -205,12 +324,59 @@ local function parseResult(value: any): ResultPayload?
 		end
 	end
 
+	local participantByUserId: { [number]: Participant } = {}
+	local rewardedUserIds: { [number]: boolean } = {}
+	for _, participant in participants do
+		participantByUserId[participant.userId] = participant
+	end
+	for _, reward in rewards do
+		local participant = participantByUserId[reward.userId]
+		if not participant or participant.isNpc then
+			return nil
+		end
+		rewardedUserIds[reward.userId] = true
+	end
+	for _, participant in participants do
+		if not participant.isNpc and not rewardedUserIds[participant.userId] then
+			return nil
+		end
+	end
+
 	return {
 		matchId = matchId,
 		winnerUserId = winnerUserId,
 		isDraw = isDraw,
 		reason = reason,
 		participants = participants,
+		rewards = rewards,
+		serverTime = serverTime,
+	}
+end
+
+local function parseRewardResolved(value: any): RewardResolvedPayload?
+	local payload = asTable(value)
+	if not payload or not hasExactKeys(payload, REWARD_RESOLVED_KEYS, 6) then
+		return nil
+	end
+
+	local matchId = boundedString(payload.matchId, MatchRules.MAX_MATCH_ID_LENGTH, false)
+	local reward = parseRewardEntry({
+		userId = payload.userId,
+		status = payload.status,
+		coins = payload.coins,
+		experience = payload.experience,
+	})
+	local serverTime = finiteNumber(payload.serverTime)
+	if not matchId or not reward or not serverTime or serverTime < 0 then
+		return nil
+	end
+
+	return {
+		matchId = matchId,
+		userId = reward.userId,
+		status = reward.status,
+		coins = reward.coins,
+		experience = reward.experience,
 		serverTime = serverTime,
 	}
 end
@@ -355,6 +521,34 @@ local function reasonText(reason: string): string
 	return REASON_LABELS[reason] or reason:gsub("_", " ")
 end
 
+local function formatInteger(value: number): string
+	local digits = string.format("%.0f", value)
+	local reversed = string.reverse(digits)
+	local grouped = reversed:gsub("(%d%d%d)", "%1,")
+	grouped = string.reverse(grouped)
+	if grouped:sub(1, 1) == "," then
+		grouped = grouped:sub(2)
+	end
+	return grouped
+end
+
+local function rewardPresentation(reward: RewardEntry): (string, Color3)
+	local coins = formatInteger(reward.coins)
+	local experience = formatInteger(reward.experience)
+	if reward.status == "Pending" then
+		return `REWARD PENDING | {coins} COINS | {experience} XP`, GOLDEN
+	elseif reward.status == "Granted" then
+		return `YOUR REWARD | +{coins} COINS | +{experience} XP`, MINT
+	elseif reward.status == "Duplicate" then
+		return `REWARD SECURED | {coins} COINS | {experience} XP`, MINT
+	elseif reward.status == "Ineligible" then
+		return "NO REWARD | MATCH ELIGIBILITY NOT MET", CREAM
+	elseif reward.status == "ReadOnly" then
+		return "REWARDS PAUSED | PROFILE IS READ ONLY", GOLDEN
+	end
+	return "REWARDS OFFLINE | PROGRESS WAS NOT CHANGED", WARM_CORAL
+end
+
 function ResultsController.create(
 	matchEventRemote: RemoteEvent,
 	requestRematchRemote: RemoteEvent
@@ -390,7 +584,7 @@ function ResultsController.create(
 
 	local sizeConstraint = Instance.new("UISizeConstraint")
 	sizeConstraint.MaxSize = Vector2.new(580, 580)
-	sizeConstraint.MinSize = Vector2.new(280, 300)
+	sizeConstraint.MinSize = Vector2.new(280, 340)
 	sizeConstraint.Parent = panel
 
 	local titleLabel = createLabel(
@@ -437,7 +631,7 @@ function ResultsController.create(
 	participantList.BackgroundTransparency = 1
 	participantList.BorderSizePixel = 0
 	participantList.Position = UDim2.fromOffset(24, 132)
-	participantList.Size = UDim2.new(1, -48, 1, -270)
+	participantList.Size = UDim2.new(1, -48, 1, -316)
 	participantList.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	participantList.CanvasSize = UDim2.fromOffset(0, 0)
 	participantList.ScrollBarImageColor3 = MINT
@@ -448,6 +642,32 @@ function ResultsController.create(
 	listLayout.Padding = UDim.new(0, 7)
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	listLayout.Parent = participantList
+
+	local rewardFrame = Instance.new("Frame")
+	rewardFrame.Name = "LocalReward"
+	rewardFrame.BackgroundColor3 = DEEP_TEAL
+	rewardFrame.BackgroundTransparency = 0.08
+	rewardFrame.Position = UDim2.new(0, 24, 1, -176)
+	rewardFrame.Size = UDim2.new(1, -48, 0, 36)
+	rewardFrame.Parent = panel
+	addCorner(rewardFrame, 10)
+	addStroke(rewardFrame, GOLDEN, 1)
+
+	local rewardLabel = createLabel(
+		rewardFrame,
+		"Status",
+		"REWARD STATUS PENDING",
+		UDim2.fromOffset(10, 3),
+		UDim2.new(1, -20, 1, -6),
+		13,
+		GOLDEN,
+		Enum.TextXAlignment.Center
+	)
+	rewardLabel.TextScaled = true
+	local rewardTextConstraint = Instance.new("UITextSizeConstraint")
+	rewardTextConstraint.MinTextSize = 10
+	rewardTextConstraint.MaxTextSize = 14
+	rewardTextConstraint.Parent = rewardLabel
 
 	local rematchStatusLabel = createLabel(
 		panel,
@@ -490,6 +710,8 @@ function ResultsController.create(
 	local currentResultTime = -math.huge
 	local latestResultTime = -math.huge
 	local latestStatusTime = -math.huge
+	local latestRewardTime = -math.huge
+	local currentLocalReward: RewardEntry? = nil
 	local participantsById: { [number]: Participant } = {}
 	local participantRows: { [number]: ParticipantRow } = {}
 	local readyUserIds: { [number]: boolean } = {}
@@ -534,6 +756,18 @@ function ResultsController.create(
 		table.clear(requiredUserIds)
 	end
 
+	local function renderLocalReward(reward: RewardEntry?)
+		currentLocalReward = reward
+		if not reward then
+			rewardLabel.Text = "SPECTATING | NO PERSONAL REWARD"
+			rewardLabel.TextColor3 = CREAM
+			return
+		end
+		local text, color = rewardPresentation(reward)
+		rewardLabel.Text = text
+		rewardLabel.TextColor3 = color
+	end
+
 	local function updateRematchButton()
 		rematchButton.Active = canRequestRematch
 		if not canRequestRematch then
@@ -572,8 +806,10 @@ function ResultsController.create(
 		currentMatchId = nil
 		currentResultTime = -math.huge
 		latestStatusTime = -math.huge
+		latestRewardTime = -math.huge
 		localReady = false
 		canRequestRematch = false
+		renderLocalReward(nil)
 		clearParticipantRows()
 		updateRematchButton()
 	end
@@ -652,12 +888,21 @@ function ResultsController.create(
 		currentResultTime = result.serverTime
 		latestResultTime = result.serverTime
 		latestStatusTime = result.serverTime
+		latestRewardTime = result.serverTime
 		localReady = false
 		for order, participant in result.participants do
 			createParticipantRow(participant, result, order)
 		end
 		local localParticipant = participantsById[localPlayer.UserId]
 		canRequestRematch = localParticipant ~= nil and not localParticipant.isNpc
+		local localReward: RewardEntry? = nil
+		for _, reward in result.rewards do
+			if reward.userId == localPlayer.UserId then
+				localReward = reward
+				break
+			end
+		end
+		renderLocalReward(localReward)
 
 		if result.isDraw then
 			titleLabel.Text = "DRAW"
@@ -715,6 +960,35 @@ function ResultsController.create(
 		updateParticipantReadyStates()
 	end
 
+	local function applyRewardResolved(resolved: RewardResolvedPayload)
+		if resolved.userId ~= localPlayer.UserId then
+			return
+		end
+		local matchId = currentMatchId
+		local currentReward = currentLocalReward
+		if
+			not matchId
+			or resolved.matchId ~= matchId
+			or closedMatchIds[resolved.matchId]
+			or resolved.serverTime < currentResultTime
+			or resolved.serverTime <= latestRewardTime
+			or not participantsById[localPlayer.UserId]
+			or not currentReward
+			or currentReward.userId ~= resolved.userId
+			or currentReward.status ~= "Pending"
+		then
+			return
+		end
+
+		latestRewardTime = resolved.serverTime
+		renderLocalReward({
+			userId = resolved.userId,
+			status = resolved.status,
+			coins = resolved.coins,
+			experience = resolved.experience,
+		})
+	end
+
 	local function handleRestarting(restarting: MatchRestartingPayload)
 		local matchId = currentMatchId
 		if
@@ -768,6 +1042,13 @@ function ResultsController.create(
 					handleRestarting(restarting)
 				else
 					reportProblem("MatchRestarting")
+				end
+			elseif kind == "RewardResolved" then
+				local resolved = parseRewardResolved(payload)
+				if resolved then
+					applyRewardResolved(resolved)
+				else
+					reportProblem("RewardResolved")
 				end
 			end
 		end

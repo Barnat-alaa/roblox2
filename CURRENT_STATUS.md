@@ -8,7 +8,7 @@ Last updated: 2026-07-15
 - Development is file-based through Rojo; generated `.rbxlx` files are used for Studio tests.
 - The inspected owner place remains unpublished (`PlaceId = 0`, `UniverseId = 0`).
 - No production publication, cloud data, paid product, or Robux action has been performed.
-- Current Development build marker: `0.4.0-dev`.
+- Current Development build marker: `0.5.0-dev`.
 
 ## Phase 1 combat-correctness implementation
 
@@ -52,6 +52,37 @@ Phase 1 is code-complete and awaiting the user-run Studio acceptance pass.
   HUD, Results UI, original code-built squirrel, layered backdrop, and restrained lighting.
 - Client work bounds for preview raycasts, effects catch-up, HUD cadence, and terrain rebuilds.
 
+## Phase 2 profile and reward implementation
+
+Phase 2 is implemented in source and awaiting combined Studio acceptance plus a separate
+owner-run published Development DataStore validation.
+
+- Profile schema v1 strictly validates bounded integer coins, account XP, economy version,
+  win/loss/draw statistics, and a dense processed-reward ledger capped at 64 entries. Account
+  level and progress-to-next-level are derived from XP rather than persisted independently.
+- Missing profiles receive an explicit starter profile. Schema v0 profiles containing coins
+  and either `xp` or legacy `experience` migrate to v1; malformed, ambiguous, unsupported, or
+  future schemas fail safely instead of being overwritten with defaults.
+- Development DataStore access is isolated behind DataService. Writable sessions use an
+  UpdateAsync lease with a unique server owner, bounded retry/backoff and budget waits,
+  periodic lease-renewing autosave, ordered per-profile operations, PlayerRemoving release,
+  and BindToClose draining.
+- Load failures may expose a validated read-only snapshot, while corrupt/future data and
+  unavailable storage disable progression writes. Player attributes expose Loading, Ready,
+  ReadOnly, Unavailable, and Released status plus storage mode and the latest safe balance/
+  derived-level view.
+- Because the inspected place is unpublished, Studio explicitly selects a process-local
+  session-memory adapter. It exercises the service/reward/UI flow without claiming cloud
+  durability and does not persist across Studio stop/start or other server processes.
+- Eligible MatchEnd rewards are calculated only from a frozen server result. Abandonment and
+  disconnect earn zero; bot rewards use deterministic 85% integer scaling.
+- Each reward atomically updates coins, XP, statistics, and its ledger entry. The stable grant
+  ID contains Development environment, match ID, and user ID but deliberately excludes the
+  economy version, preventing a balance-table change from regranting the same completion.
+- Results can show Pending, Granted, Duplicate, Ineligible, ReadOnly, or Unavailable reward
+  state. A compact profile panel reads server-owned Player attributes; the client cannot
+  submit a balance, reward amount, outcome, or grant ID.
+
 ## Validation record
 
 Latest local validation for the Phase 1 source:
@@ -61,12 +92,13 @@ Latest local validation for the Phase 1 source:
 - Roblox-aware `luau-lsp analyze`: passed.
 - Production and TestEZ Rojo builds: passed.
 - `git diff --check`: passed.
-- Source contains **71 TestEZ specs** (14 new movement/support cases).
+- Source contains **111 TestEZ specs**, including profile validation/migration, derived-level,
+  reward eligibility/calculation/idempotency, ledger-bounding, and session-rule cases.
 
 Runtime truth is intentionally separate: the latest recorded Studio TestEZ execution remains
-**56 passed, 0 failed, 0 skipped** from the earlier build. The 71-spec Phase 1 source and its
-physics behavior have not yet been accepted in Studio; the user will provide screenshots or
-feel reports after testing.
+**56 passed, 0 failed, 0 skipped** from the earlier build. The 111-spec Phase 1/2 source,
+Phase 1 physics behavior, and Phase 2 service/UI integration have not yet been accepted in
+Studio; the user will provide screenshots or feel reports after testing.
 
 Earlier Studio evidence still includes authoritative human and bot shots, terrain deltas,
 elimination, Victory/Defeat Results, two-human rematch, solo disconnect recovery, and a clean
@@ -86,10 +118,13 @@ Phase 1 and are not representative-device guarantees.
 
 ## Open development gaps
 
-- Phase 1 still needs the user-run 71-spec Studio execution and movement/support/bot/rematch
+- Phase 1 still needs the user-run 111-spec Studio execution and movement/support/bot/rematch
   feel pass described in `NEXT_ACTIONS.md`.
-- Profiles, session locking, migrations, rewards, coins, XP, inventory, and persistent
-  progression are not implemented. Results currently grant nothing.
+- Phase 2 profile/reward integration needs a local session-memory runtime pass. Native
+  DataStore persistence, lease contention, retry, leave/rejoin, and shutdown durability need
+  owner-run validation in a published private Development place.
+- Schema v1 intentionally has no inventory, owned/equipped cosmetic, settings, receipt, quest,
+  mastery, or season fields yet.
 - There is no real lobby or cross-server matchmaking; Results expiry currently returns to the
   waiting scheduler.
 - Late clients can recover terrain snapshots but not an active projectile presentation.
@@ -101,7 +136,7 @@ Phase 1 and are not representative-device guarantees.
 
 ## Next implementation phase
 
-After Phase 1 runtime acceptance, begin Phase 2: versioned session-safe profiles, migrations,
-autosave/shutdown handling, read-only failure behavior, stable result identities, and
-idempotent server-side coins/XP rewards. Production data remains disabled until those systems
-and their failure tests are complete.
+First complete the combined Phase 1/2 Studio acceptance and owner-run published Development
+persistence checks in `NEXT_ACTIONS.md`. The next code milestone is a compact lobby and one
+free original cosmetic with validated ownership/equip persistence. Production data remains
+disabled; no Production migration, publication, or currency operation is authorized.

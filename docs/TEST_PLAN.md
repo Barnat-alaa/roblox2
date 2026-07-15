@@ -70,7 +70,7 @@ CI commands use the repository’s pinned tool configuration. At minimum, CI mus
 | TURN-002 | timeout/race | timeout vs fire, disconnect in each state, duplicate transition | one accepted outcome; match cannot deadlock |
 | TURN-003 | settlement/readiness | support loss, last-second jump, invalid bot, settle timeout | same match waits/recoveries are bounded; no partial roster turn or stale advance |
 | SEC-001 | request validation | unknown IDs, wrong types, extra/oversized tables, NaN/infinity/extremes | rejected before state mutation/expensive work |
-| ECO-001 | rewards | duplicate result, rejoin, shutdown/retry, bot multiplier, ineligible AFK | balance/inventory changes exactly once |
+| ECO-001 | rewards | duplicate result, fresh rematch ID, bot multiplier/rounding, abandonment/disconnect, insufficient participation, bounded ledger | each retained/reachable identity changes balance/stat/ledger once or returns an explicit ineligible/failure state |
 | PAY-001 | receipts | duplicate/delayed/unknown/cancel/data failure/already owned | no lost or duplicate grant; safe retry/pending behavior |
 | DATA-001 | migrations | every supported version, corrupt/missing field, repeated migration | valid current schema or explicit safe failure; repeat is stable |
 | DATA-002 | sessions | concurrent lease, stale lease, autosave/remove/shutdown race | one writer; no default overwrite; bounded recovery |
@@ -104,7 +104,7 @@ Use fixed seeds and fixtures. A tolerance must reflect floating-point behavior, 
 Current Development evidence (2026-07-15):
 
 - The latest recorded Studio TestEZ run passed 56 tests with 0 failures and 0 skipped tests.
-  Current source contains 71 specs; the Phase 1 additions await a user-run Studio rerun.
+  Current source contains 111 specs; the Phase 1/2 additions await a user-run Studio rerun.
 - A genuine one-server/two-client run completed elimination, authoritative Victory/Defeat
   Results, retained elimination across respawn, unanimous rematch consent, and a clean restart
   under a fresh match ID.
@@ -120,12 +120,16 @@ Current Development evidence (2026-07-15):
 - BotAim solves were observed at 3.43-5.65 ms. A Studio server snapshot measured 16.65 ms
   p50, 17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. These observations do not
   replace representative-device performance testing.
-- Rewards and profile persistence remain out of scope for this implemented slice; Results do
-  not grant currency, XP, or items.
+- Schema-v1 profile validation/migration/derived-level rules, session lease/state rules, and
+  retained-ledger idempotent result reward rules are implemented in source. The profile panel and Results
+  reward feedback also exist, but their Studio service/UI integration is not yet accepted.
+- Unpublished Studio deliberately uses process-local session memory and provides no
+  cross-session durability. Native DataStore persistence has not been tested in a published
+  Development place.
 
-Pending Phase 1 user acceptance:
+Pending combined Phase 1/2 user acceptance:
 
-1. Run Studio TestEZ from the current source and record all 71 specs passing before changing
+1. Run Studio TestEZ from the current source and record all 111 specs passing before changing
    the recorded runtime total.
 2. Exercise A/D cumulative movement, zero-budget stopping, grounded/two-jump limits, and a
    jump at the final second; confirm no jitter, extra jump, match reset, or premature turn.
@@ -140,6 +144,16 @@ Pending Phase 1 user acceptance:
 7. Capture one wide gameplay screenshot, one bot close-up, and one Results/HUD screenshot;
    note silhouette readability, palette contrast, visual clutter, camera scale, and whether the
    scene feels playful or generic. Use that feedback to drive the next code-art pass.
+8. In one unpublished Studio server process, confirm a new profile becomes writable through
+   SessionMemory, an eligible bot result moves Pending to Granted once, balances/derived level
+   update, a rematch uses a fresh grant identity, and no profile/reward Output error appears.
+9. Stop/restart the unpublished place and treat a reset session-memory balance as expected,
+   not as proof of data loss or persistence.
+10. In a separately owner-approved published Development place, validate native DataStore
+    leave/rejoin, schema-v0 migration, competing lease, duplicate grant, transient failure/
+    read-only behavior, autosave, PlayerRemoving, and BindToClose before accepting persistence.
+    Use an authenticated positive-UserId client and require `CLOUD`/`Persistent`; synthetic
+    Studio users remain on SessionMemory and are not cloud evidence.
 
 Repeat with player leaving:
 
@@ -196,10 +210,12 @@ Pass means no unauthorized mutation, bounded server work, expected counter/diagn
 
 | Case | Expected |
 | --- | --- |
-| normal leave/rejoin | current profile and equipment restored |
+| unpublished Studio stop/start | process-local SessionMemory may reset; never count this as cloud-persistence evidence |
+| normal leave/rejoin | current schema coins, XP, statistics, and processed grants restored; equipment applies after its migration ships |
 | transient load/save failure | bounded retry; clear safe state; no default overwrite |
 | concurrent server join | one writable lease; other session waits/fails safely |
-| server shutdown after result | reward once after recovery |
+| orderly server shutdown after queued result | bounded drain commits once or exposes a safe failure; no duplicate |
+| abrupt crash before grant enqueue/commit | reward may be lost; record as the durable-outbox release blocker |
 | migration from every supported schema | current valid schema with ownership preserved |
 | duplicate reward key | no second currency/inventory change |
 | successful approved staging purchase | exact item once, then equip |
@@ -207,6 +223,9 @@ Pass means no unauthorized mutation, bounded server work, expected counter/diagn
 | receipt retry after persistence failure | no acknowledgement until durable safe result |
 | delayed receipt after rejoin | exact durable grant once |
 | unknown/wrong-environment product | no grant, diagnostic emitted |
+
+Run all durable rows against a published private Development place first. The current
+unpublished place can validate integration and idempotency within one server process only.
 
 Production data deletion, paid-product creation, real-Robux tests, and major migration require explicit owner approval.
 

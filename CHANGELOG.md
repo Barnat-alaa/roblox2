@@ -44,6 +44,21 @@ All notable project changes are recorded here.
   cells, world conversion, dirty chunks, and snapshots.
 - Required product, technical, security, economy, analytics, testing, and release documents.
 - GitHub Actions validation workflow with pinned Rokit download checksum.
+- Strict schema-v1 player profiles with bounded integer coins/XP, win/loss/draw statistics,
+  a 64-entry processed-reward ledger, derived account levels, and validated schema-v0
+  migration.
+- A Development DataService with UpdateAsync session leases, bounded retry/backoff and budget
+  waits, per-profile operation ordering, autosave, PlayerRemoving release, BindToClose drain,
+  and explicit Loading/Ready/ReadOnly/Unavailable/Released states.
+- An explicit process-local session-memory adapter for unpublished Studio places; it exercises
+  integration without pretending to provide cross-session persistence.
+- Server-derived eligible-match rewards with deterministic bot scaling and atomic
+  balance/stat/ledger application. Stable environment/match/player grant IDs exclude economy
+  version so configuration changes cannot regrant a completed match.
+- A compact client profile panel and Results reward feedback for Pending, Granted, Duplicate,
+  Ineligible, ReadOnly, and Unavailable outcomes using server-owned state only.
+- Pure TestEZ coverage for profile validation/migration/level derivation, reward eligibility,
+  calculation/idempotency/ledger bounds, and session lease/state rules.
 
 ### Changed
 
@@ -67,7 +82,7 @@ All notable project changes are recorded here.
   fresh bounded deadline.
 - Throttled movement/correction diagnostics and remaining-distance replication.
 - Added a guarded Results expiry so abandoned result state cannot stall the server forever.
-- Advanced the local Development build marker to `0.4.0-dev`.
+- Advanced the local Development build marker to `0.5.0-dev`.
 
 ### Security
 
@@ -83,6 +98,10 @@ All notable project changes are recorded here.
   committed atomically only after requested jump validation succeeds.
 - Projectile impact/finalization uses an exact match-resolution lease; explosion targets are
   restricted to the current registered combatant roster.
+- Profile mutations are serialized behind a server DataService, corrupt/future data is not
+  replaced by defaults, and read-only/unavailable profiles cannot receive progression grants.
+- Result rewards are derived from frozen authoritative MatchEnd state and applied with their
+  processed-grant ledger entry in one safe update path; no client supplies a reward or balance.
 - Malformed, stale, or revision-gapped client terrain state triggers rate-limited snapshot
   recovery instead of partial mutation.
 - Production publishing remains a manual, owner-approved operation.
@@ -91,7 +110,10 @@ All notable project changes are recorded here.
 
 - StyLua, Selene, Roblox-aware Luau analysis, and both Rojo builds passed.
 - Latest recorded Studio TestEZ run: 56 passed, 0 failed, 0 skipped. Current source contains
-  71 specs; the Phase 1 additions await a user-run Studio rerun.
+  111 specs; the Phase 1/2 additions await a user-run Studio rerun.
+- Phase 2 native DataStore behavior has not been validated in a published Development place;
+  the unpublished Studio fallback is intentionally session-memory-only and is not evidence of
+  cross-session durability.
 - The final terrain-enabled playable build booted clean with matching initial server/client
   terrain revision 0 and an active central hazard collision run.
 - A real Acorn request produced Delta 0 → 1 with 9 changed cells and matching server/client
