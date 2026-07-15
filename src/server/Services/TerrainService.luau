@@ -13,6 +13,7 @@ local NetworkService = require(script.Parent.NetworkService)
 type Remotes = NetworkService.Remotes
 type Grid = TerrainGrid.Grid
 type CellDelta = TerrainGrid.CellDelta
+export type SupportResult = TerrainGrid.SupportResult
 
 local GRID_WIDTH = 45
 local GRID_HEIGHT = 24
@@ -38,6 +39,7 @@ local revision = 0
 local resetCount = 0
 local started = false
 local lastSnapshotAt: { [Player]: number } = {}
+local hazardContactHandler: ((Model) -> ())? = nil
 
 local function isFinite(value: number): boolean
 	return value == value and value > -math.huge and value < math.huge
@@ -125,9 +127,9 @@ local function configureCollisionPart(part: Part, code: number)
 	if code == TerrainGrid.Codes.Hazard then
 		part.Touched:Connect(function(otherPart)
 			local character = otherPart:FindFirstAncestorOfClass("Model")
-			local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-			if humanoid and humanoid.Health > 0 then
-				humanoid.Health = 0
+			local handler = hazardContactHandler
+			if character and handler then
+				handler(character)
 			end
 		end)
 	end
@@ -734,6 +736,32 @@ end
 function TerrainService.isIndestructibleInstance(instance: Instance): boolean
 	return TerrainService.isTerrainInstance(instance)
 		and instance:GetAttribute("TerrainCode") == TerrainGrid.Codes.Indestructible
+end
+
+function TerrainService.findSupportBelow(
+	minimumWorldX: number,
+	maximumWorldX: number,
+	maximumWorldY: number,
+	maximumDrop: number,
+	penetrationTolerance: number?
+): SupportResult?
+	local currentGrid = grid
+	if not currentGrid then
+		return nil
+	end
+	return TerrainGrid.findSupportBelow(
+		currentGrid,
+		minimumWorldX,
+		maximumWorldX,
+		maximumWorldY,
+		maximumDrop,
+		penetrationTolerance
+	)
+end
+
+function TerrainService.setHazardContactHandler(handler: (Model) -> ())
+	assert(hazardContactHandler == nil, "hazard contact handler may only be registered once")
+	hazardContactHandler = handler
 end
 
 function TerrainService.getRevision(): number

@@ -75,6 +75,28 @@ local function makeDecorativePart(
 	return part
 end
 
+local function makeBotDecorativePart(
+	parent: Model,
+	name: string,
+	size: Vector3,
+	cframe: CFrame,
+	color: Color3,
+	material: Enum.Material,
+	shape: Enum.PartType?
+): Part
+	local root = parent:FindFirstChild("HumanoidRootPart")
+	assert(root and root:IsA("BasePart"), "BotCritter root must exist before its visuals")
+	local part = makeDecorativePart(parent, name, size, cframe, color, material, shape)
+	part.Anchored = false
+	part.Massless = true
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = name .. "Weld"
+	weld.Part0 = root
+	weld.Part1 = part
+	weld.Parent = part
+	return part
+end
+
 local function createBackdropLayers(parent: Instance)
 	local sun = makeDecorativePart(
 		parent,
@@ -130,7 +152,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 	-- A compact original red-squirrel silhouette made only from low-cost primitives.
 	-- Decorative pieces never participate in queries or physics; the root remains the
 	-- single authoritative hit body.
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"TailLower",
 		Vector3.new(2.4, 5.4, 2.1),
@@ -139,7 +161,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		Enum.Material.SmoothPlastic,
 		Enum.PartType.Ball
 	)
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"TailTip",
 		Vector3.new(2.7, 3.8, 2.2),
@@ -149,7 +171,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		Enum.PartType.Ball
 	)
 
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"Head",
 		Vector3.new(4.2, 3.8, 3.4),
@@ -159,7 +181,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		Enum.PartType.Ball
 	)
 	for _, side in { -1, 1 } do
-		makeDecorativePart(
+		makeBotDecorativePart(
 			model,
 			if side < 0 then "LeftEar" else "RightEar",
 			Vector3.new(1.35, 1.8, 1.2),
@@ -169,7 +191,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 			Enum.Material.SmoothPlastic,
 			Enum.PartType.Ball
 		)
-		makeDecorativePart(
+		makeBotDecorativePart(
 			model,
 			if side < 0 then "LeftEye" else "RightEye",
 			Vector3.new(0.52, 0.7, 0.38),
@@ -180,7 +202,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		)
 	end
 
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"Muzzle",
 		Vector3.new(1.7, 1.25, 0.55),
@@ -189,7 +211,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		Enum.Material.SmoothPlastic,
 		Enum.PartType.Ball
 	)
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"Nose",
 		Vector3.new(0.55, 0.45, 0.35),
@@ -198,7 +220,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		Enum.Material.SmoothPlastic,
 		Enum.PartType.Ball
 	)
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"BellyPatch",
 		Vector3.new(2.7, 3.25, 0.42),
@@ -207,7 +229,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		Enum.Material.SmoothPlastic,
 		Enum.PartType.Ball
 	)
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"Scarf",
 		Vector3.new(4.15, 0.5, 3.25),
@@ -217,7 +239,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		Enum.PartType.Block
 	)
 
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"LauncherBarrel",
 		Vector3.new(3.8, 1.05, 1.05),
@@ -226,7 +248,7 @@ local function createBotDetails(model: Model, rootPosition: Vector3)
 		Enum.Material.Metal,
 		Enum.PartType.Cylinder
 	)
-	makeDecorativePart(
+	makeBotDecorativePart(
 		model,
 		"LauncherMuzzle",
 		Vector3.new(0.42, 1.38, 1.38),
@@ -291,7 +313,46 @@ local function createBotCritter(parent: Instance): Model
 		true
 	)
 	root.Shape = Enum.PartType.Ball
+	root.Anchored = false
+	root.CanCollide = false
+	root.CanTouch = false
+	root.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.8, 0, 100, 100)
+	model.PrimaryPart = root
+
+	-- Humanoids can rewrite HumanoidRootPart collision during state changes. Keep a
+	-- separate welded physics hull so the bot always has stable terrain contact.
+	local collisionBody = makePart(
+		model,
+		"CollisionBody",
+		root.Size,
+		root.Position,
+		WARM_CORAL,
+		Enum.Material.SmoothPlastic,
+		true
+	)
+	collisionBody.Transparency = 1
+	collisionBody.CastShadow = false
+	collisionBody.Anchored = false
+	collisionBody.Massless = true
+	local collisionWeld = Instance.new("WeldConstraint")
+	collisionWeld.Name = "CollisionBodyWeld"
+	collisionWeld.Part0 = root
+	collisionWeld.Part1 = collisionBody
+	collisionWeld.Parent = collisionBody
 	createBotDetails(model, root.Position)
+
+	local uprightAttachment = Instance.new("Attachment")
+	uprightAttachment.Name = "UprightAttachment"
+	uprightAttachment.Parent = root
+	local upright = Instance.new("AlignOrientation")
+	upright.Name = "UprightConstraint"
+	upright.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	upright.Attachment0 = uprightAttachment
+	upright.CFrame = CFrame.identity
+	upright.MaxTorque = 1_000_000
+	upright.MaxAngularVelocity = 20
+	upright.Responsiveness = 40
+	upright.Parent = root
 
 	local humanoid = Instance.new("Humanoid")
 	humanoid.DisplayName = BotConfig.displayName
@@ -299,10 +360,17 @@ local function createBotCritter(parent: Instance): Model
 	humanoid.Health = 100
 	humanoid.BreakJointsOnDeath = false
 	humanoid.RequiresNeck = false
+	humanoid.EvaluateStateMachine = false
+	humanoid.AutoRotate = false
+	humanoid.WalkSpeed = 0
+	humanoid.JumpHeight = 0
 	humanoid.Parent = model
 
-	model.PrimaryPart = root
 	model.Parent = parent
+	local canSetNetworkOwnership = root:CanSetNetworkOwnership()
+	if canSetNetworkOwnership then
+		root:SetNetworkOwner(nil)
+	end
 	CollectionService:AddTag(model, "Combatant")
 	return model
 end

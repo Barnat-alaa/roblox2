@@ -76,6 +76,60 @@ return function()
 		end)
 	end)
 
+	describe("TerrainGrid support queries", function()
+		it("finds solid and indestructible support beneath a footprint", function()
+			local grid = createGrid(4, 4, "Empty")
+			TerrainGrid.setCell(grid, 2, 2, "Solid")
+			TerrainGrid.setCell(grid, 3, 3, "Indestructible")
+
+			local solid = TerrainGrid.findSupportBelow(grid, 4.5, 7.5, 9, 4)
+			local protected = TerrainGrid.findSupportBelow(grid, 8.5, 11.5, 13, 4)
+
+			expect(solid ~= nil and solid.kind).to.equal("Solid")
+			expect(solid ~= nil and solid.surfaceY).to.equal(8)
+			expect(protected ~= nil and protected.kind).to.equal("Indestructible")
+			expect(protected ~= nil and protected.surfaceY).to.equal(12)
+		end)
+
+		it("reports a hazard before solid terrain lower in the fall path", function()
+			local grid = createGrid(2, 4, "Empty")
+			TerrainGrid.setCell(grid, 1, 1, "Solid")
+			TerrainGrid.setCell(grid, 1, 3, "Hazard")
+
+			local result = TerrainGrid.findSupportBelow(grid, 0.5, 3.5, 16, 16)
+
+			expect(result ~= nil and result.kind).to.equal("Hazard")
+			expect(result ~= nil and result.surfaceY).to.equal(12)
+		end)
+
+		it("supports a footprint that overlaps a thin ledge at a cell edge", function()
+			local grid = createGrid(3, 2, "Empty")
+			TerrainGrid.setCell(grid, 2, 1, "Solid")
+
+			local result = TerrainGrid.findSupportBelow(grid, 3.8, 5.2, 5, 2)
+
+			expect(result ~= nil and result.kind).to.equal("Solid")
+			expect(result ~= nil and result.surfaceY).to.equal(4)
+		end)
+
+		it("loses support after the supporting cell is destroyed", function()
+			local grid = createGrid(3, 3, "Empty")
+			TerrainGrid.setCell(grid, 2, 2, "Solid")
+			expect(TerrainGrid.findSupportBelow(grid, 4.5, 7.5, 9, 2) ~= nil).to.equal(true)
+
+			TerrainGrid.destroyCircle(grid, Vector2.new(6, 6), 1)
+			expect(TerrainGrid.findSupportBelow(grid, 4.5, 7.5, 9, 2)).to.equal(nil)
+		end)
+
+		it("rejects out-of-grid and invalid bounded queries", function()
+			local grid = createGrid(2, 2, "Solid")
+
+			expect(TerrainGrid.findSupportBelow(grid, 20, 24, 8, 8)).to.equal(nil)
+			expect(TerrainGrid.findSupportBelow(grid, 4, 3, 8, 8)).to.equal(nil)
+			expect(TerrainGrid.findSupportBelow(grid, 0, 4, 8, -1)).to.equal(nil)
+		end)
+	end)
+
 	describe("TerrainGrid destruction", function()
 		it("clips a circular crater cleanly at a map edge", function()
 			local grid = createGrid(3, 3, "Solid")

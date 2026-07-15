@@ -33,6 +33,13 @@ All notable project changes are recorded here.
 - Clean rematch reset of terrain, BotCritter, characters, wind, turn state, and timers.
 - Pure match-rule coverage for winner/draw resolution, retained elimination, readiness, and
   match ID validation.
+- Pure movement rules and TestEZ coverage for cumulative path distance, speed, arena bounds,
+  knockback exemptions, monotonic samples, grounded jumps, cooldown, and jump rejection.
+- Footprint-aware terrain support queries and TestEZ coverage for solid, protected, hazard,
+  edge-overlap, destroyed, invalid, and outside-grid cases.
+- Server-authoritative movement requests with match/turn/sequence validation, input leases,
+  cumulative movement allowance, bounded jumping, and keyboard/touch controls.
+- Bounded environmental settlement and recovery for player characters and the physical bot.
 - Terrain TestEZ coverage for compact deltas, ordering, atomic updates, overlap, protected
   cells, world conversion, dirty chunks, and snapshots.
 - Required product, technical, security, economy, analytics, testing, and release documents.
@@ -54,7 +61,13 @@ All notable project changes are recorded here.
   colour-grade, and bloom. Decorative geometry is non-queryable and non-physical.
 - Hardened match admission so a missing or dead human character is reloaded instead of being
   promoted into a new match as an ineligible participant.
-- Advanced the local Development build marker to `0.3.0-dev`.
+- Made BotCritter a server-owned physics pawn with welded massless visuals, an independent
+  collision hull, and upright stabilization.
+- Routed aiming timeout through environmental settlement and gave each readiness failure a
+  fresh bounded deadline.
+- Throttled movement/correction diagnostics and remaining-distance replication.
+- Added a guarded Results expiry so abandoned result state cannot stall the server forever.
+- Advanced the local Development build marker to `0.4.0-dev`.
 
 ### Security
 
@@ -66,6 +79,10 @@ All notable project changes are recorded here.
   authoritative readiness idempotent.
 - Bot turns are initiated entirely by the server and pass through the same weapon, turn-token,
   projectile, damage, terrain, elimination, and Result validation as human intent.
+- Movement requests are exact-shape validated, token-bucket limited, match/turn scoped, and
+  committed atomically only after requested jump validation succeeds.
+- Projectile impact/finalization uses an exact match-resolution lease; explosion targets are
+  restricted to the current registered combatant roster.
 - Malformed, stale, or revision-gapped client terrain state triggers rate-limited snapshot
   recovery instead of partial mutation.
 - Production publishing remains a manual, owner-approved operation.
@@ -74,7 +91,7 @@ All notable project changes are recorded here.
 
 - StyLua, Selene, Roblox-aware Luau analysis, and both Rojo builds passed.
 - Latest recorded Studio TestEZ run: 56 passed, 0 failed, 0 skipped. Current source contains
-  57 specs; the added tuning spec awaits a user-run Studio rerun.
+  71 specs; the Phase 1 additions await a user-run Studio rerun.
 - The final terrain-enabled playable build booted clean with matching initial server/client
   terrain revision 0 and an active central hazard collision run.
 - A real Acorn request produced Delta 0 → 1 with 9 changed cells and matching server/client

@@ -25,6 +25,12 @@ foundation:
 - a frozen 1v1 roster, with late joiners held as spectators for the active match and eligible
   to fill an open slot at the next boundary, plus a server-owned BotCritter that uses bounded,
   imperfect aim and the normal authoritative turn/fire path for solo matches;
+- server-authoritative A/D movement and jumping with turn tokens, sequence validation,
+  cumulative distance, speed, ground-state, jump-count, plane, and arena enforcement;
+- explicit logical support detection plus bounded consecutive-sample settling and recovery for
+  both player characters and the physical BotCritter after terrain loss or turn timeout;
+- projectile leases, exact combatant damage whitelists, bounded readiness waits, and expiring
+  Results state so stale callbacks cannot damage or advance a later match;
 - persistent elimination state that remains authoritative across Roblox character respawns;
 - one authoritative match result, a Results interface, unanimous human rematch consent, and
   a fresh-match reset of terrain, bot, characters, wind, turns, and timers;
@@ -34,20 +40,20 @@ foundation:
 - bounded client fluidity work: no 97-point trajectory allocation, at most 48 preview
   raycasts per rebuild, 16 effect catch-up steps per frame, a 10 Hz HUD cadence, and one
   terrain chunk rebuild per Heartbeat;
-- 57 TestEZ specs in source, lint/format configuration, and reproducible Rojo builds;
+- 71 TestEZ specs in source, lint/format configuration, and reproducible Rojo builds;
 - a CI workflow with pinned tooling, build validation, and a basic secret scan.
 
 Static analysis, strict analysis, and both Rojo builds are clean. The latest recorded Studio
-TestEZ run reports **56 passed, 0 failed, 0 skipped**; source now contains 57 specs, so the
-added tuning test still needs a user-run Studio rerun. A live pre-final-tuning bot match
+TestEZ run reports **56 passed, 0 failed, 0 skipped**; source now contains 71 specs, so the
+Phase 1 additions still need a user-run Studio rerun. A live pre-Phase-1 bot match
 verified authoritative bot firing, human elimination, and the DEFEAT Results flow. Final bot
-rematch and runtime/visual-feel validation remain user-run acceptance work. In Studio, bot
+rematch plus movement/support/runtime-feel validation remain user-run acceptance work. In Studio, bot
 aim solving was observed at 3.43-5.65 ms, while a server snapshot measured 16.65 ms p50,
 17.72 ms p95, 18.04 ms p99, and 18.37 ms worst frame time. These are development observations,
-not production or representative-device guarantees. The next implementation milestone is
-movement, grounding, and terrain-support hardening.
+not production or representative-device guarantees. After Phase 1 runtime acceptance, the
+next implementation milestone is session-safe profiles and idempotent match rewards.
 
-The current Development build identifies itself as `0.3.0-dev`. Character and environment
+The current Development build identifies itself as `0.4.0-dev`. Character and environment
 art remain editable programmer-art foundations; screenshot feedback will drive the next
 silhouette, palette, scale, and readability pass before any production asset work.
 
@@ -97,6 +103,7 @@ DataModel inspection and playtesting; Rojo remains the source-of-truth for code.
 ## Controls in the greybox slice
 
 - `A` / `D`: move while permitted by the current turn.
+- `Space`: jump while grounded and within the turn jump allowance.
 - `Up` / `Down`: adjust aim angle.
 - `Left` / `Right`: adjust shot power.
 - `1`–`4`: select an MVP weapon.

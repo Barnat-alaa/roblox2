@@ -14,6 +14,8 @@ export type DamageSource = {
 	player: Player?,
 }
 
+export type KnockbackHandler = (model: Model, requestedVelocity: Vector3) -> boolean
+
 local DamageService = {}
 
 local function modelFromPart(part: BasePart): Model?
@@ -38,7 +40,9 @@ end
 function DamageService.applyExplosion(
 	origin: Vector3,
 	definition: ProjectileDefinition,
-	source: DamageSource
+	source: DamageSource,
+	validTargets: { Model },
+	applyKnockback: KnockbackHandler
 ): { [Model]: number }
 	local overlapParams = OverlapParams.new()
 	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -53,12 +57,18 @@ function DamageService.applyExplosion(
 		minDamage = definition.minDamage,
 	}
 	local affected: { [Model]: number } = {}
+	local validTargetSet: { [Model]: boolean } = {}
+	for _, model in validTargets do
+		if model.Parent ~= nil then
+			validTargetSet[model] = true
+		end
+	end
 
 	for _, part in
 		Workspace:GetPartBoundsInRadius(origin, definition.explosionRadius, overlapParams)
 	do
 		local model = modelFromPart(part)
-		if not model or affected[model] ~= nil then
+		if not model or not validTargetSet[model] or affected[model] ~= nil then
 			continue
 		end
 
@@ -96,12 +106,7 @@ function DamageService.applyExplosion(
 				local planar = Vector3.new(knockback.X, math.max(knockback.Y, 0) + 8, 0)
 				local currentVelocity = root.AssemblyLinearVelocity
 				local requestedVelocity = currentVelocity + planar
-				local cappedVelocity = Vector3.new(
-					math.clamp(requestedVelocity.X, -80, 80),
-					math.clamp(requestedVelocity.Y, -15, 70),
-					0
-				)
-				root:ApplyImpulse((cappedVelocity - currentVelocity) * root.AssemblyMass)
+				applyKnockback(model, requestedVelocity)
 			end
 		end
 	end

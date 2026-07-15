@@ -5,17 +5,14 @@
 - The inspected owner place is unpublished; verified playtests currently use generated local
   `.rbxlx` builds rather than a published Development place.
 - Static analysis, strict analysis, and both Rojo builds pass. The latest recorded Studio
-  TestEZ run completed with 56 passed, 0 failed, and 0 skipped; source contains 57 specs, so
-  the added tuning spec still needs a user-run Studio rerun.
-- Bot turns are implemented. A pre-final-tuning live run verified authoritative firing,
-  human elimination, and DEFEAT Results, but the final-tuning bot rematch and visual-feel
-  signoff remain user-run validation.
+  TestEZ run completed with 56 passed, 0 failed, and 0 skipped; source contains 71 specs, so
+  the Phase 1 additions still need a user-run Studio rerun.
+- Phase 1 movement, grounding, physical bot collision, support-loss settling, projectile
+  leases, roster-only damage, readiness recovery, and Results expiry are implemented, but
+  their final runtime/visual-feel signoff remains user-run validation.
 - Persistent profiles, rewards, matchmaking, cosmetics, and monetisation are not implemented.
 - Results currently grant no coins, XP, items, or persistent progress.
-- Terrain collision and client rendering now follow terrain edits, but support loss relies on
-  Roblox physics; explicit support detection and bounded settling remain incomplete.
-- Movement is plane/distance constrained, but accumulated movement, jump frequency, and ground
-  state still need stronger server validation before competitive testing.
+- Results expiry returns to the waiting scheduler because a dedicated lobby is not yet built.
 - Mobile controls require device testing and accessibility tuning.
 - Client fluidity has explicit trajectory, effects, HUD, and terrain-work bounds, but its
   visual feel and representative-device performance have not been accepted. The current
@@ -33,8 +30,7 @@
 
 - Select and clear a final public name.
 - Complete original production art, audio, and asset-licence review.
-- Complete the user-run 57-spec rerun and final-tuning bot rematch/visual validation.
-- Harden movement, grounding, support loss, and bounded settling.
+- Complete the user-run 71-spec rerun and Phase 1 movement/support/bot/rematch validation.
 - Add session-locked persistent data with migrations and shutdown tests.
 - Complete multiplayer, exploit, mobile, performance, and rollback testing.
 - Publish only after the Creator Dashboard maturity questionnaire and tester permissions are

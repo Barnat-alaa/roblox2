@@ -10,6 +10,7 @@ local CameraController = require(script.Parent.Controllers.CameraController)
 local EffectsController = require(script.Parent.Controllers.EffectsController)
 local HUDController = require(script.Parent.Controllers.HUDController)
 local InputController = require(script.Parent.Controllers.InputController)
+local MovementController = require(script.Parent.Controllers.MovementController)
 local ResultsController = require(script.Parent.Controllers.ResultsController)
 local TerrainController = require(script.Parent.Controllers.TerrainController)
 local TrajectoryController = require(script.Parent.Controllers.TrajectoryController)
@@ -23,6 +24,8 @@ type Intent = {
 }
 
 type MatchState = {
+	matchId: string,
+	turnToken: number,
 	phase: string,
 	activeUserId: number,
 	deadline: number,
@@ -111,13 +114,19 @@ local function parseMatchState(value: any): MatchState?
 	end
 
 	local phase = payload.phase
+	local matchId = payload.matchId
+	local turnToken = finiteNumber(payload.turnToken)
 	local activeUserId = finiteNumber(payload.activeUserId)
 	local deadline = finiteNumber(payload.deadline)
 	local roundNumber = finiteNumber(payload.roundNumber)
 	local wind = finiteNumber(payload.wind)
 	local serverTime = finiteNumber(payload.serverTime)
 	if
-		type(phase) ~= "string"
+		type(matchId) ~= "string"
+		or type(phase) ~= "string"
+		or not turnToken
+		or turnToken < 1
+		or turnToken ~= math.floor(turnToken)
 		or not activeUserId
 		or not deadline
 		or not roundNumber
@@ -128,6 +137,8 @@ local function parseMatchState(value: any): MatchState?
 	end
 
 	return {
+		matchId = matchId,
+		turnToken = turnToken,
 		phase = phase,
 		activeUserId = activeUserId,
 		deadline = deadline,
@@ -207,6 +218,7 @@ end
 
 local remotesFolder = ReplicatedStorage:WaitForChild(RemoteNames.folder)
 local requestFireRemote = waitForRemote(remotesFolder, RemoteNames.requestFire)
+local requestMovementRemote = waitForRemote(remotesFolder, RemoteNames.requestMovement)
 local selectWeaponRemote = waitForRemote(remotesFolder, RemoteNames.selectWeapon)
 local combatEventRemote = waitForRemote(remotesFolder, RemoteNames.combatEvent)
 local matchStateRemote = waitForRemote(remotesFolder, RemoteNames.matchState)
@@ -217,6 +229,7 @@ local matchEventRemote = waitForRemote(remotesFolder, RemoteNames.matchEvent)
 local requestRematchRemote = waitForRemote(remotesFolder, RemoteNames.requestRematch)
 
 local inputController = InputController.create()
+local movementController = MovementController.create(requestMovementRemote)
 local initialIntent: Intent = inputController.getIntent()
 local cameraController = CameraController.create()
 local effectsController = EffectsController.create()
@@ -269,7 +282,9 @@ table.insert(
 
 		local localTurn = isLocalTurn(state)
 		local canFire = state.activeUserId == Players.LocalPlayer.UserId and state.phase == "Aiming"
+		local canMove = canFire
 		cameraController.setActiveUserId(state.activeUserId)
+		movementController.setTurn(state.matchId, state.turnToken, canMove)
 		inputController.setEnabled(canFire)
 		hudController.setMatchState(state)
 		hudController.setCanAct(canFire)
@@ -327,6 +342,7 @@ local function destroy()
 		connection:Disconnect()
 	end
 	resultsController.destroy()
+	movementController.destroy()
 	terrainController.destroy()
 	trajectoryController.destroy()
 	effectsController.destroy()

@@ -39,6 +39,11 @@ export type Snapshot = {
 	cells: { number },
 }
 
+export type SupportResult = {
+	surfaceY: number,
+	kind: CellKind,
+}
+
 local FORMAT_VERSION = 1
 local MAX_DIMENSION = 4_096
 local MAX_CELLS = 262_144
@@ -234,6 +239,96 @@ function TerrainGrid.cellToWorldCenter(grid: Grid, x: number, y: number): Vector
 	end
 
 	return grid.origin + Vector2.new((x - 0.5) * grid.cellSize, (y - 0.5) * grid.cellSize)
+end
+
+-- Finds the first authoritative terrain surface below a horizontal footprint.
+-- A Hazard is returned rather than skipped so runtime settling can eliminate a
+-- falling combatant instead of snapping it through danger onto solid below.
+function TerrainGrid.findSupportBelow(
+	grid: Grid,
+	minimumWorldX: number,
+	maximumWorldX: number,
+	maximumWorldY: number,
+	maximumDrop: number,
+	penetrationTolerance: number?
+): SupportResult?
+	if
+		not isFinite(minimumWorldX)
+		or not isFinite(maximumWorldX)
+		or not isFinite(maximumWorldY)
+		or not isFinite(maximumDrop)
+		or maximumDrop < 0
+		or minimumWorldX > maximumWorldX
+	then
+		return nil
+	end
+
+	local tolerance = penetrationTolerance or 0
+	if not isFinite(tolerance) or tolerance < 0 then
+		return nil
+	end
+
+	local worldMinimumX = grid.origin.X
+	local worldMaximumX = grid.origin.X + grid.width * grid.cellSize
+	local clippedMinimumX = math.max(minimumWorldX, worldMinimumX)
+	local clippedMaximumX = math.min(maximumWorldX, worldMaximumX)
+	if clippedMinimumX >= worldMaximumX or clippedMaximumX <= worldMinimumX then
+		return nil
+	end
+
+	-- Treat the footprint's right edge as exclusive when it lies exactly on a
+	-- cell boundary, matching worldToCell's half-open convention.
+	local edgeEpsilon = math.min(grid.cellSize * 1e-6, 1e-5)
+	local firstX =
+		math.clamp(math.floor((clippedMinimumX - grid.origin.X) / grid.cellSize) + 1, 1, grid.width)
+	local lastSampleX = math.max(clippedMinimumX, clippedMaximumX - edgeEpsilon)
+	local lastX =
+		math.clamp(math.floor((lastSampleX - grid.origin.X) / grid.cellSize) + 1, 1, grid.width)
+
+	local highestAllowedSurface = maximumWorldY + tolerance
+	local lowestAllowedSurface = maximumWorldY - maximumDrop
+	local firstY =
+		math.min(grid.height, math.floor((highestAllowedSurface - grid.origin.Y) / grid.cellSize))
+	if firstY < 1 then
+		return nil
+	end
+
+	for y = firstY, 1, -1 do
+		local surfaceY = grid.origin.Y + y * grid.cellSize
+		if surfaceY < lowestAllowedSurface then
+			break
+		end
+		if surfaceY <= highestAllowedSurface then
+			local sawSolid = false
+			local sawIndestructible = false
+			local sawHazard = false
+			for x = firstX, lastX do
+				local kind = TerrainGrid.getCell(grid, x, y)
+				if kind == "Indestructible" then
+					sawIndestructible = true
+				elseif kind == "Solid" then
+					sawSolid = true
+				elseif kind == "Hazard" then
+					sawHazard = true
+				end
+			end
+
+			if sawIndestructible or sawSolid then
+				return {
+					surfaceY = surfaceY,
+					kind = if sawIndestructible then "Indestructible" else "Solid",
+				}
+			end
+			if sawHazard then
+				return {
+					surfaceY = surfaceY,
+					kind = "Hazard",
+				}
+			end
+		end
+	end
+
+	return nil
 end
 
 -- A cell is inside a crater when its world-space centre is inside or on the

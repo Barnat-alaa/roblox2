@@ -63,8 +63,12 @@ CI commands use the repository’s pinned tool configuration. At minimum, CI mus
 | DMG-002 | knockback | direction, zero vector, near/far, mass abstraction | finite direction and capped horizontal/vertical magnitude |
 | TER-001 | crater | center, edge, thin floor, overlapping crater, indestructible cells | only legal cells change; result deterministic |
 | TER-002 | drill/chunks | path clipping, dirty set, revision gap | bounded edits; only intersected chunks dirty; gap requests resync |
+| TER-003 | support | solid/protected/hazard, thin edge, destroyed support, invalid/outside query | first overlapping support is deterministic; hazards are never skipped during recovery |
+| MOV-001 | turn movement | speed, cumulative reversal distance, arena, knockback exemption, stale time | only legal samples mutate state; total path cannot exceed allowance |
+| MOV-002 | jump admission | grounded/airborne, cooldown, per-turn count, timeout edge | only physically grounded active actor jumps; rejected request is atomic |
 | TURN-001 | ordering | normal sequence, dead actor, last survivor, draw | only legal next state and actor |
 | TURN-002 | timeout/race | timeout vs fire, disconnect in each state, duplicate transition | one accepted outcome; match cannot deadlock |
+| TURN-003 | settlement/readiness | support loss, last-second jump, invalid bot, settle timeout | same match waits/recoveries are bounded; no partial roster turn or stale advance |
 | SEC-001 | request validation | unknown IDs, wrong types, extra/oversized tables, NaN/infinity/extremes | rejected before state mutation/expensive work |
 | ECO-001 | rewards | duplicate result, rejoin, shutdown/retry, bot multiplier, ineligible AFK | balance/inventory changes exactly once |
 | PAY-001 | receipts | duplicate/delayed/unknown/cancel/data failure/already owned | no lost or duplicate grant; safe retry/pending behavior |
@@ -97,10 +101,10 @@ Use fixed seeds and fixtures. A tolerance must reflect floating-point behavior, 
 | gamepad emulation/hardware | smoke | required if advertised | focus navigation, glyphs, aim/power |
 | high latency/loss simulation | best effort | required where Studio supports | prediction, timeout, duplicate/reorder tolerance |
 
-Current Development evidence (2026-07-14):
+Current Development evidence (2026-07-15):
 
 - The latest recorded Studio TestEZ run passed 56 tests with 0 failures and 0 skipped tests.
-  Current source contains 57 specs; the added tuning spec awaits a user-run Studio rerun.
+  Current source contains 71 specs; the Phase 1 additions await a user-run Studio rerun.
 - A genuine one-server/two-client run completed elimination, authoritative Victory/Defeat
   Results, retained elimination across respawn, unanimous rematch consent, and a clean restart
   under a fresh match ID.
@@ -119,17 +123,21 @@ Current Development evidence (2026-07-14):
 - Rewards and profile persistence remain out of scope for this implemented slice; Results do
   not grant currency, XP, or items.
 
-Pending M5.2 user acceptance:
+Pending Phase 1 user acceptance:
 
-1. Run Studio TestEZ from the current source and record all 57 specs passing before changing
+1. Run Studio TestEZ from the current source and record all 71 specs passing before changing
    the recorded runtime total.
-2. Start one server and one client, allow the BotCritter to take multiple turns, and confirm
-   turn label, bot health, camera focus, projectile, impact, damage, and terrain presentation.
-3. Finish a match, select Rematch, and confirm a fresh match ID, restored health, reset terrain,
+2. Exercise A/D cumulative movement, zero-budget stopping, grounded/two-jump limits, and a
+   jump at the final second; confirm no jitter, extra jump, match reset, or premature turn.
+3. Remove support under the human and BotCritter; confirm bounded fall/landing/recovery or
+   elimination and no endless EnvironmentalResolution state.
+4. Allow BotCritter to take multiple turns and confirm its collision body, health, camera,
+   projectile, knockback, damage, and terrain presentation remain correct.
+5. Finish a match, select Rematch, and confirm a fresh match ID, restored health, reset terrain,
    valid bot identity, fresh turn state, and no unexpected Output error.
-4. Record whether aim preview, projectile follow, impacts, HUD updates, and chunk rebuilding
+6. Record whether movement, aim preview, projectile follow, impacts, HUD updates, and chunks
    feel smooth in Studio. Treat this as user visual acceptance, not an automated pass.
-5. Capture one wide gameplay screenshot, one bot close-up, and one Results/HUD screenshot;
+7. Capture one wide gameplay screenshot, one bot close-up, and one Results/HUD screenshot;
    note silhouette readability, palette contrast, visual clutter, camera scale, and whether the
    scene feels playful or generic. Use that feedback to drive the next code-art pass.
 

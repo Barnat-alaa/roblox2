@@ -20,6 +20,7 @@
       "$properties": {
         "AutoJumpEnabled": false,
         "CharacterJumpHeight": 7.2,
+        "CharacterUseJumpPower": false,
         "CharacterWalkSpeed": 16
       },
       "StarterPlayerScripts": {

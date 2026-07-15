@@ -51,6 +51,12 @@ type ResultPayload = {
 	reason: string,
 	participants: { ResultParticipant },
 	serverTime: number,
+	expiresAt: number,
+}
+
+export type ProjectileLease = {
+	matchId: string,
+	resolutionToken: number,
 }
 
 export type BotTurnContext = {
@@ -73,7 +79,6 @@ local INITIAL_MATCH_DELAY_SECONDS = 1
 local COUNTDOWN_SECONDS = 1.5
 local TURN_START_SECONDS = 0.65
 local TURN_END_SECONDS = 0.55
-local ENVIRONMENT_SETTLE_SECONDS = 0.8
 local CHARACTER_READY_RETRY_SECONDS = 0.25
 local MATCH_EVENT_TIME_STEP = 1e-6
 local REMATCH_RATE_LIMIT_SECONDS = 0.2
@@ -95,6 +100,7 @@ local currentMatchId = ""
 local participants: { ParticipantRecord } = {}
 local participantByUserId: { [number]: ParticipantRecord } = {}
 local resultPayload: ResultPayload? = nil
+local resultExpiresAt = 0
 local readyByUserId: { [number]: boolean } = {}
 local lastRematchRequestAt: { [Player]: number } = {}
 local departingUserIds: { [number]: boolean } = {}
@@ -107,6 +113,7 @@ local lastMatchEventTime = 0
 local resultEmissionCount = 0
 local rematchRestartCount = 0
 local botTurnHandler: BotTurnHandler? = nil
+local characterReadyDeadline = 0
 local started = false
 
 local beginNextTurn: () -> ()
@@ -114,6 +121,7 @@ local enterWaitingState: () -> ()
 local eliminateParticipant: (participant: ParticipantRecord, reason: string, expectedMatchId: string) -> ()
 local scheduleMatchIfNeeded: () -> ()
 local startMatch: (humanPlayers: { Player }, resetWorld: boolean, suppliedMatchId: string?) -> ()
+local startMatchSafely: (humanPlayers: { Player }, resetWorld: boolean, suppliedMatchId: string?) -> ()
 
 local function nextMatchEventTime(): number
 	local current = Workspace:GetServerTimeNow()
@@ -150,6 +158,8 @@ end
 
 local function statePayload()
 	return {
+		matchId = currentMatchId,
+		turnToken = transitionToken,
 		phase = phase,
 		activeUserId = if activeParticipant then activeParticipant.userId else 0,
 		deadline = deadline,
@@ -301,6 +311,7 @@ local function enterResults(outcome: Outcome, reasonOverride: string?)
 	local finalReason = if reasonOverride == "disconnect" and not outcome.isDraw
 		then "disconnect"
 		else outcome.reason
+	resultExpiresAt = Workspace:GetServerTimeNow() + GameConfig.resultsDurationSeconds
 	local payload: ResultPayload = {
 		matchId = currentMatchId,
 		winnerUserId = outcome.winnerUserId,
@@ -308,6 +319,7 @@ local function enterResults(outcome: Outcome, reasonOverride: string?)
 		reason = finalReason,
 		participants = resultParticipants(),
 		serverTime = nextMatchEventTime(),
+		expiresAt = resultExpiresAt,
 	}
 	resultPayload = payload
 	resultEmissionCount += 1
@@ -321,11 +333,23 @@ local function enterResults(outcome: Outcome, reasonOverride: string?)
 	end
 
 	phase = "Results"
+	deadline = resultExpiresAt
 	broadcastState(nil)
 	broadcastRematchStatus(nil)
+	local completedMatchId = currentMatchId
+	local resultsToken = transitionToken
+	task.delay(GameConfig.resultsDurationSeconds, function()
+		if
+			phase == "Results"
+			and currentMatchId == completedMatchId
+			and transitionToken == resultsToken
+			and resultPayload == payload
+		then
+			enterWaitingState()
+		end
+	end)
 
 	if #requiredHumanUserIds() == 0 then
-		local completedMatchId = currentMatchId
 		task.defer(function()
 			if phase == "Results" and currentMatchId == completedMatchId then
 				enterWaitingState()
@@ -459,34 +483,24 @@ local function isTurnEligible(participant: ParticipantRecord): boolean
 	end
 	if participant.isNpc then
 		local model = participant.model
-		local humanoid = if model then model:FindFirstChildOfClass("Humanoid") else nil
-		local root = if model then model:FindFirstChild("HumanoidRootPart") else nil
-		return model ~= nil
-			and model.Parent ~= nil
-			and humanoid ~= nil
-			and humanoid.Health > 0
-			and root ~= nil
-			and root:IsA("BasePart")
+		return model ~= nil and model.Parent ~= nil and CharacterService.isModelReadyForTurn(model)
 	end
 
 	local player = participant.player
 	return player ~= nil
 		and player.Parent == Players
 		and not departingUserIds[player.UserId]
-		and CharacterService.isEligible(player)
+		and CharacterService.isReadyForTurn(player)
 		and humanDeathConnections[player] ~= nil
 end
 
 local function turnCandidates(): { ParticipantRecord }
-	-- A freshly loading human must never be targeted at the spectator parking
-	-- location. Hold the whole match until every living human has a watched,
-	-- authoritative character.
+	-- Never advance with a partial living roster. Humans may still be loading and
+	-- the physical bot may have lost a required component without firing Died.
+	-- The bounded readiness deadline recovers either case instead of silently
+	-- granting endless turns to the remaining candidate.
 	for _, participant in participants do
-		if
-			not participant.isNpc
-			and not participant.eliminated
-			and not isTurnEligible(participant)
-		then
+		if not participant.eliminated and not isTurnEligible(participant) then
 			return {}
 		end
 	end
@@ -504,6 +518,64 @@ local function turnCandidates(): { ParticipantRecord }
 		return left.userId < right.userId
 	end)
 	return candidates
+end
+
+local function currentCombatantModels(): { Model }
+	local models = {}
+	local included: { [Model]: boolean } = {}
+	for _, participant in participants do
+		if participant.eliminated then
+			continue
+		end
+		local model = if participant.isNpc
+			then participant.model
+			else if participant.player then participant.player.Character else nil
+		if
+			model
+			and model.Parent ~= nil
+			and CharacterService.isCombatantModel(model)
+			and not included[model]
+		then
+			included[model] = true
+			table.insert(models, model)
+		end
+	end
+	return models
+end
+
+local function settleEnvironmentThenEndTurn(settlementModels: { Model }, expectedMatchId: string)
+	transitionToken += 1
+	local token = transitionToken
+	phase = "EnvironmentalResolution"
+	activeParticipant = nil
+	deadline = 0
+	CharacterService.setActivePlayer(nil)
+	broadcastState(nil)
+	task.spawn(function()
+		local settlement = CharacterService.awaitEnvironmentSettled(settlementModels, function()
+			return currentMatchId == expectedMatchId
+				and isCurrentTransition(token, "EnvironmentalResolution")
+		end)
+		if
+			not settlement.completed or not isCurrentTransition(token, "EnvironmentalResolution")
+		then
+			return
+		end
+
+		local resolutionReason = pendingResolutionReason
+		pendingResolutionReason = nil
+		if resolveOutcomeNow(resolutionReason) then
+			return
+		end
+
+		phase = "TurnEnd"
+		broadcastState(nil)
+		task.delay(TURN_END_SECONDS, function()
+			if isCurrentTransition(token, "TurnEnd") then
+				beginNextTurn()
+			end
+		end)
+	end)
 end
 
 local function targetPlayerForBot(): Player?
@@ -533,6 +605,15 @@ beginNextTurn = function()
 
 	local candidates = turnCandidates()
 	if #candidates == 0 then
+		local currentTime = Workspace:GetServerTimeNow()
+		if characterReadyDeadline <= 0 then
+			characterReadyDeadline = currentTime + GameConfig.characterReadyTimeoutSeconds
+		end
+		if currentTime >= characterReadyDeadline then
+			warn("[CritterClash] Character readiness timed out; returning to waiting state")
+			enterWaitingState()
+			return
+		end
 		transitionToken += 1
 		local token = transitionToken
 		phase = "Countdown"
@@ -547,6 +628,7 @@ beginNextTurn = function()
 		end)
 		return
 	end
+	characterReadyDeadline = 0
 
 	local selectedIndex = 1
 	local wrappedRoster = lastActorUserId ~= nil
@@ -572,7 +654,9 @@ beginNextTurn = function()
 	lastActorWasNpc = selectedParticipant.isNpc
 	phase = "TurnStart"
 	deadline = 0
-	CharacterService.setActivePlayer(selectedParticipant.player)
+	-- TurnStart is presentation-only. Movement begins with the timed Aiming phase,
+	-- preventing a free movement window before the authoritative deadline exists.
+	CharacterService.setActivePlayer(nil)
 	broadcastState(nil)
 
 	task.delay(TURN_START_SECONDS, function()
@@ -599,6 +683,7 @@ beginNextTurn = function()
 		end
 		phase = "Aiming"
 		deadline = Workspace:GetServerTimeNow() + GameConfig.turnDurationSeconds
+		CharacterService.setActivePlayer(selectedParticipant.player, token)
 		broadcastState(nil)
 
 		if selectedParticipant.isNpc then
@@ -686,6 +771,7 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 	currentMatchId = suppliedMatchId or newMatchId()
 	assert(MatchRules.isValidMatchId(currentMatchId), "match ID must satisfy network bounds")
 	resultPayload = nil
+	resultExpiresAt = 0
 	table.clear(readyByUserId)
 	table.clear(participants)
 	table.clear(participantByUserId)
@@ -697,6 +783,7 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 	lastActorUserId = nil
 	lastActorWasNpc = false
 	currentWind = 0
+	characterReadyDeadline = Workspace:GetServerTimeNow() + GameConfig.characterReadyTimeoutSeconds
 	Workspace:SetAttribute("CritterClashWinnerUserId", nil)
 	Workspace:SetAttribute("CritterClashResultIsDraw", nil)
 
@@ -704,10 +791,13 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 	-- is rebuilt; CharacterService keeps them ineligible until a fresh character arrives.
 	CharacterService.configureMatch(humans, resetWorld)
 	local includeBot = #humans == 1
-	local target = ArenaService.resetBotCritter(currentArena, includeBot)
+	CharacterService.setNpcCombatant(nil)
+	ArenaService.resetBotCritter(currentArena, false)
 	if resetWorld then
 		TerrainService.reset()
 	end
+	local target = ArenaService.resetBotCritter(currentArena, includeBot)
+	CharacterService.setNpcCombatant(target)
 
 	for _, player in humans do
 		local participant: ParticipantRecord = {
@@ -757,6 +847,20 @@ startMatch = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMat
 	end)
 end
 
+startMatchSafely = function(humanPlayers: { Player }, resetWorld: boolean, suppliedMatchId: string?)
+	local startError = "unknown match setup error"
+	local succeeded = xpcall(function()
+		startMatch(humanPlayers, resetWorld, suppliedMatchId)
+	end, function(message)
+		startError = tostring(message)
+		return message
+	end)
+	if not succeeded then
+		warn(string.format("[CritterClash] Match setup failed: %s", startError))
+		enterWaitingState()
+	end
+end
+
 enterWaitingState = function()
 	local shouldResetWorld = currentMatchId ~= ""
 	transitionToken += 1
@@ -769,6 +873,8 @@ enterWaitingState = function()
 	lastActorWasNpc = false
 	currentWind = 0
 	currentMatchId = ""
+	resultExpiresAt = 0
+	characterReadyDeadline = 0
 	Workspace:SetAttribute("CritterClashWinnerUserId", nil)
 	Workspace:SetAttribute("CritterClashResultIsDraw", nil)
 	resultPayload = nil
@@ -779,6 +885,7 @@ enterWaitingState = function()
 	table.clear(readyByUserId)
 	CharacterService.setActivePlayer(nil)
 	CharacterService.configureMatch({}, false)
+	CharacterService.setNpcCombatant(nil)
 	local currentArena = arena
 	if currentArena then
 		ArenaService.resetBotCritter(currentArena, false)
@@ -818,7 +925,7 @@ scheduleMatchIfNeeded = function()
 		if phase ~= "WaitingForPlayers" or currentMatchId ~= "" then
 			return
 		end
-		startMatch(Players:GetPlayers(), false, nil)
+		startMatchSafely(Players:GetPlayers(), false, nil)
 	end)
 end
 
@@ -870,6 +977,10 @@ local function beginRematch()
 
 	restartInProgress = true
 	local completedMatchId = currentMatchId
+	-- Reserve the transition immediately so a Results-expiry callback cannot race
+	-- an already accepted unanimous rematch before the deferred reset begins.
+	transitionToken += 1
+	local rematchReservationToken = transitionToken
 	local nextMatchId = newMatchId()
 	local currentRemotes = remotes
 	if currentRemotes then
@@ -883,20 +994,14 @@ local function beginRematch()
 	setDiagnostics()
 
 	task.defer(function()
-		if phase ~= "Results" or currentMatchId ~= completedMatchId then
+		if
+			phase ~= "Results"
+			or currentMatchId ~= completedMatchId
+			or transitionToken ~= rematchReservationToken
+		then
 			return
 		end
-		local resetError = "unknown reset error"
-		local resetSucceeded = xpcall(function()
-			startMatch(humans, true, nextMatchId)
-		end, function(message)
-			resetError = tostring(message)
-			return message
-		end)
-		if not resetSucceeded then
-			warn(string.format("[CritterClash] Rematch reset failed: %s", tostring(resetError)))
-			enterWaitingState()
-		end
+		startMatchSafely(humans, true, nextMatchId)
 	end)
 end
 
@@ -1054,18 +1159,7 @@ function MatchService.start(networkRemotes: Remotes, matchArena: Model)
 				and phase == "Aiming"
 				and Workspace:GetServerTimeNow() >= deadline
 			then
-				transitionToken += 1
-				local token = transitionToken
-				phase = "TurnEnd"
-				activeParticipant = nil
-				deadline = 0
-				CharacterService.setActivePlayer(nil)
-				broadcastState(nil)
-				task.delay(TURN_END_SECONDS, function()
-					if isCurrentTransition(token, "TurnEnd") then
-						beginNextTurn()
-					end
-				end)
+				settleEnvironmentThenEndTurn(currentCombatantModels(), currentMatchId)
 			end
 		end
 	end)
@@ -1098,23 +1192,56 @@ function MatchService.canFire(player: Player): (boolean, string?)
 	return true, nil
 end
 
-local function enterProjectileResolution()
+function MatchService.canMove(
+	player: Player,
+	expectedMatchId: string,
+	expectedTurnToken: number
+): (boolean, string?)
+	if expectedMatchId ~= currentMatchId or currentMatchId == "" then
+		return false, "stale_match"
+	end
+	if phase ~= "Aiming" then
+		return false, "movement_locked"
+	end
+	if expectedTurnToken ~= transitionToken then
+		return false, "stale_turn"
+	end
+	if Workspace:GetServerTimeNow() >= deadline then
+		return false, "turn_expired"
+	end
+	local participant = activeParticipant
+	if
+		not participant
+		or participant.isNpc
+		or participant.player ~= player
+		or participant.eliminated
+		or not CharacterService.isEligible(player)
+	then
+		return false, "not_your_turn"
+	end
+	return true, nil
+end
+
+local function enterProjectileResolution(): ProjectileLease
 	transitionToken += 1
 	phase = "ProjectileResolving"
 	deadline = 0
 	pendingResolutionReason = nil
 	CharacterService.setActivePlayer(nil)
 	broadcastState(nil)
+	return table.freeze({
+		matchId = currentMatchId,
+		resolutionToken = transitionToken,
+	}) :: ProjectileLease
 end
 
-function MatchService.beginProjectile(player: Player): (boolean, string?)
+function MatchService.beginProjectile(player: Player): (boolean, string?, ProjectileLease?)
 	local allowed, reason = MatchService.canFire(player)
 	if not allowed then
-		return false, reason
+		return false, reason, nil
 	end
 
-	enterProjectileResolution()
-	return true, nil
+	return true, nil, enterProjectileResolution()
 end
 
 function MatchService.beginBotProjectile(
@@ -1122,18 +1249,18 @@ function MatchService.beginBotProjectile(
 	expectedMatchId: string,
 	expectedTurnToken: number,
 	model: Model
-): (boolean, string?)
+): (boolean, string?, ProjectileLease?)
 	if expectedMatchId ~= currentMatchId or currentMatchId == "" then
-		return false, "stale_match"
+		return false, "stale_match", nil
 	end
 	if phase ~= "Aiming" then
-		return false, "match_not_aiming"
+		return false, "match_not_aiming", nil
 	end
 	if expectedTurnToken ~= transitionToken then
-		return false, "stale_turn"
+		return false, "stale_turn", nil
 	end
 	if Workspace:GetServerTimeNow() >= deadline then
-		return false, "turn_expired"
+		return false, "turn_expired", nil
 	end
 
 	local participant = activeParticipant
@@ -1145,44 +1272,33 @@ function MatchService.beginBotProjectile(
 		or participant.eliminated
 		or not isTurnEligible(participant)
 	then
-		return false, "bot_not_active"
+		return false, "bot_not_active", nil
 	end
 
-	enterProjectileResolution()
-	return true, nil
+	return true, nil, enterProjectileResolution()
 end
 
-function MatchService.finishProjectile()
-	if phase ~= "ProjectileResolving" then
-		return
+function MatchService.isProjectileLeaseActive(lease: ProjectileLease): boolean
+	return phase == "ProjectileResolving"
+		and currentMatchId ~= ""
+		and lease.matchId == currentMatchId
+		and lease.resolutionToken == transitionToken
+end
+
+function MatchService.getProjectileDamageTargets(lease: ProjectileLease): { Model }
+	if not MatchService.isProjectileLeaseActive(lease) then
+		return {}
+	end
+	return currentCombatantModels()
+end
+
+function MatchService.finishProjectile(lease: ProjectileLease): boolean
+	if not MatchService.isProjectileLeaseActive(lease) then
+		return false
 	end
 
-	transitionToken += 1
-	local token = transitionToken
-	phase = "EnvironmentalResolution"
-	broadcastState(nil)
-	task.delay(ENVIRONMENT_SETTLE_SECONDS, function()
-		if not isCurrentTransition(token, "EnvironmentalResolution") then
-			return
-		end
-
-		local resolutionReason = pendingResolutionReason
-		pendingResolutionReason = nil
-		if resolveOutcomeNow(resolutionReason) then
-			return
-		end
-
-		phase = "TurnEnd"
-		activeParticipant = nil
-		deadline = 0
-		CharacterService.setActivePlayer(nil)
-		broadcastState(nil)
-		task.delay(TURN_END_SECONDS, function()
-			if isCurrentTransition(token, "TurnEnd") then
-				beginNextTurn()
-			end
-		end)
-	end)
+	settleEnvironmentThenEndTurn(MatchService.getProjectileDamageTargets(lease), lease.matchId)
+	return true
 end
 
 function MatchService.setBotTurnHandler(handler: BotTurnHandler)

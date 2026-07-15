@@ -25,39 +25,30 @@ Project Critter Clash is a temporary internal codename. This plan targets an ori
 | OPS | repository, CI, environments, publishing, and rollback |
 | OWNER | account-holder approvals and Creator Dashboard actions |
 
-## Implementation checkpoint — 2026-07-14
+## Implementation checkpoint — 2026-07-15
 
-The authoritative 1v1 match loop and M5.2 bot code are implemented in the local Development
-build:
+The authoritative 1v1 loop, solo bot, and Phase 1 combat-correctness code are implemented in
+the local `0.4.0-dev` Development build:
 
-- the roster is frozen for each match, late joiners spectate for the active match, and a
-  server-owned BotCritter fills the solo opponent slot;
-- the bot uses bounded, imperfect aim and the normal authoritative turn, projectile, damage,
-  terrain, elimination, Result, and rematch services;
-- elimination remains authoritative across Roblox character respawns, and rematch resets
-  terrain, bot, characters, wind, turns, and timers under a fresh match ID;
-- the latest recorded Studio TestEZ run passed 56 tests with 0 failures and 0 skipped; source
-  now contains 57 specs, so the added tuning spec awaits a user-run Studio rerun;
-- a live pre-final-tuning bot run verified authoritative firing, human elimination, and
-  DEFEAT Results. Final-tuning bot rematch and runtime/visual-feel acceptance remain user-run;
-- trajectory preview work is bounded to at most 48 raycasts without the former 97-point
-  allocation, effects catch up at most 16 steps per frame and idle early-out, HUD timed state
-  runs at 10 Hz, and terrain rebuilds one dirty chunk per Heartbeat;
-- the `0.3.0-dev` code-art pass adds an original low-part squirrel rival, layered backdrop,
-  and restrained lighting grade; screenshot feedback, production modelling, animation, and
-  asset review remain later art work;
-- Studio observations measured BotAim at 3.43-5.65 ms and a server snapshot at 16.65 ms p50,
-  17.72 ms p95, 18.04 ms p99, and 18.37 ms worst. These are development observations, not
-  production or representative-device guarantees.
+- movement is turn-token and sequence scoped, speed/arena/plane constrained, and charged by
+  cumulative path distance with bounded grounded jumps;
+- terrain exposes explicit footprint support, while humans and the physical BotCritter use a
+  stable-sample settlement/recovery path after impacts, support loss, and turn timeout;
+- explosion damage is restricted to the current roster, projectile finalization is leased to
+  the exact match resolution, and readiness/results waits have bounded recovery;
+- client and server high-frequency work remains cadence- or count-bounded;
+- source contains 71 TestEZ specs, and format, lint, strict analysis, plus both Rojo builds
+  pass locally;
+- the latest recorded Studio TestEZ execution remains the earlier 56-pass run. Phase 1 physics,
+  all 71 current specs, bot rematch, and visual feel remain user-run acceptance work.
 
-**Immediate acceptance step:** run the current 57-spec suite in Studio, then complete and
-rematch a final-tuning one-server/one-client/bot match while checking Output and visual feel.
+**Immediate acceptance step:** run the 71-spec suite and the focused movement/support/bot
+checklist in `NEXT_ACTIONS.md`, then return screenshots or a feel description.
 
-**Next implementation milestone:** harden M2.2/M4.3 movement, grounding, support loss, and
-bounded settling. After that, continue the original broader plan: profiles and idempotent
-rewards, late-projectile recovery, mobile/accessibility, lobby/cosmetics/audio/analytics, and
-private publication only with owner approval. Results and rematch are implemented, but
-profiles and coins/XP grants have not started. No Development or Production place has been
+**Next implementation milestone after acceptance:** Phase 2 / M5.4 session-safe profiles,
+migrations, autosave and shutdown behavior, followed by idempotent result-based coins/XP.
+Then continue late-projectile recovery, mobile/accessibility, lobby/cosmetics/audio/analytics,
+and private publication only with owner approval. No Development or Production place has been
 published.
 
 ## Seven-day private MVP
@@ -80,7 +71,7 @@ The critical path is repository and Studio sync → combat plane → turn author
 | ID | Task | Depends on | Estimate / owner | Acceptance and test | Principal risk / fallback |
 | --- | --- | --- | --- | --- | --- |
 | M2.1 | Implement the server-owned match/turn state machine and 20-second prototype timer; tune toward 18 from playtests | M1.3 | 2 h / NET | Only the active participant can act; timeout advances exactly once; disconnect does not deadlock | Collapse Movement and Aiming into one ActiveTurn state while retaining explicit transition guards |
-| M2.2 | **HARDEN NEXT:** enforce bounded left/right movement and jump with plane, accumulated-distance, speed, jump-frequency, grounded-state, and arena validation | M1.4, M2.1 | 1.5 h / NET | Server rejects off-turn, over-speed, excess-distance, excess-jump, airborne-jump, and out-of-bounds movement in two-client tests | Disable jumping and use a fixed movement-distance budget |
+| M2.2 | **IMPLEMENTED; STUDIO ACCEPTANCE PENDING:** enforce bounded left/right movement and jump with plane, accumulated-distance, speed, jump-frequency, grounded-state, and arena validation | M1.4, M2.1 | 1.5 h / NET | Server rejects off-turn, over-speed, excess-distance, excess-jump, airborne-jump, and out-of-bounds movement in two-client tests | Disable jumping and use a fixed movement-distance budget |
 | M2.3 | Add angle, power, weapon selection, round wind, active-player HUD, health, and timer | M2.1 | 1.5 h / UI, GD | PC input reaches min/max values predictably; HUD clearly identifies actor, wind, weapon, and time | Use buttons/keys with discrete angle and power steps |
 | M2.4 | Build the first mobile input layout and safe-area/resolution pass | M2.3 | 1 h / UI, QA | Core controls work at representative phone and tablet emulation sizes with no overlap or hover requirement | Ship separate angle/power controls; defer drag-to-aim comparison |
 
@@ -103,7 +94,7 @@ The critical path is repository and Studio sync → combat plane → turn author
 | --- | --- | --- | --- | --- | --- |
 | M4.1 | Build an authoritative 2D cell grid with solid, empty, hazardous, and indestructible states | M1.4 | 1.5 h / NET | Map data loads deterministically; bounds and indestructible shell are validated | Use a small fixed map encoded as rows |
 | M4.2 | Render destructible grouped cells and replicate only changed cell batches | M4.1 | 2 h / ENG, NET | Both clients converge after a crater; unchanged regions are not rebuilt | Use coarser visible tiles and no meshing |
-| M4.3 | **HARDEN NEXT:** apply circular crater masks, explicit support loss, bounded falling/settling, hazard/out-of-world resolution, and spawn protection | M3.4, M4.2 | 2 h / NET | Edge, thin ledge, overlapping crater, spawn, and hazard tests resolve without desync or endless falling | Use kill-plane recovery/damage and indestructible spawn pads |
+| M4.3 | **IMPLEMENTED; STUDIO ACCEPTANCE PENDING:** apply circular crater masks, explicit support loss, bounded falling/settling, hazard/out-of-world resolution, and spawn protection | M3.4, M4.2 | 2 h / NET | Edge, thin ledge, overlapping crater, spawn, and hazard tests resolve without desync or endless falling | Use kill-plane recovery/damage and indestructible spawn pads |
 | M4.4 | Add Mole Drill as a terrain-first second weapon using the same request and simulation path | M3.2, M4.3 | 0.5 h / GD, ENG | Drill removes a bounded path and has lower direct damage; duplicate requests remain harmless | Convert it to a straight low-damage projectile with a larger crater |
 
 **Day 4 gate:** an explosion visibly and consistently reshapes the battlefield without a full-map rebuild.

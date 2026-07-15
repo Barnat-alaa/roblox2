@@ -10,6 +10,7 @@ local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Weapons = require(ReplicatedStorage.Shared.Config.Weapons)
 local Wind = require(ReplicatedStorage.Shared.Simulation.Wind)
 
+local CharacterService = require(script.Parent.CharacterService)
 local DamageService = require(script.Parent.DamageService)
 local MatchService = require(script.Parent.MatchService)
 local NetworkService = require(script.Parent.NetworkService)
@@ -19,6 +20,7 @@ type Remotes = NetworkService.Remotes
 type ProjectileDefinition = Weapons.ProjectileDefinition
 type BallisticState = Ballistics.State
 type DamageSource = DamageService.DamageSource
+type ProjectileLease = MatchService.ProjectileLease
 
 export type ShotIntent = {
 	weaponId: string,
@@ -26,7 +28,7 @@ export type ShotIntent = {
 	power: number,
 }
 
-type BeginProjectile = () -> (boolean, string?)
+type BeginProjectile = () -> (boolean, string?, ProjectileLease?)
 
 local ProjectileService = {}
 
@@ -88,7 +90,8 @@ local function simulateShot(
 	velocity: Vector3,
 	acceleration: Vector3,
 	shotId: string,
-	seed: number
+	seed: number,
+	lease: ProjectileLease
 )
 	local state: BallisticState = Ballistics.createState(origin, velocity)
 	local accumulator = 0
@@ -116,40 +119,73 @@ local function simulateShot(
 			connection = nil
 		end
 
-		local damageSucceeded, damageError =
-			pcall(DamageService.applyExplosion, position, definition, source)
-		if not damageSucceeded then
-			warn(string.format("[CritterClash] Explosion damage failed: %s", tostring(damageError)))
-		end
-
-		local terrainCellsChanged = 0
-		local terrainSucceeded, terrainResult = pcall(function(): number
-			if suppressTerrain then
-				return 0
+		local impactError: any = nil
+		local impactSucceeded = xpcall(function()
+			if not MatchService.isProjectileLeaseActive(lease) then
+				return
 			end
-			if terrainPathStart then
-				return TerrainService.applyDrillPath(
-					terrainPathStart,
-					position,
-					definition.terrainRadius
+
+			local validTargets = MatchService.getProjectileDamageTargets(lease)
+			local damageSucceeded, damageError = pcall(
+				DamageService.applyExplosion,
+				position,
+				definition,
+				source,
+				validTargets,
+				CharacterService.applyKnockback
+			)
+			if not damageSucceeded then
+				warn(
+					string.format(
+						"[CritterClash] Explosion damage failed: %s",
+						tostring(damageError)
+					)
 				)
 			end
-			return TerrainService.applyImpact(position, definition.terrainRadius)
+
+			local terrainCellsChanged = 0
+			local terrainSucceeded, terrainResult = pcall(function(): number
+				if suppressTerrain then
+					return 0
+				end
+				if terrainPathStart then
+					return TerrainService.applyDrillPath(
+						terrainPathStart,
+						position,
+						definition.terrainRadius
+					)
+				end
+				return TerrainService.applyImpact(position, definition.terrainRadius)
+			end)
+			if terrainSucceeded then
+				terrainCellsChanged = terrainResult :: number
+			else
+				warn(
+					string.format(
+						"[CritterClash] Terrain impact failed: %s",
+						tostring(terrainResult)
+					)
+				)
+			end
+			remotes.combatEvent:FireAllClients("ProjectileImpacted", {
+				shotId = shotId,
+				position = position,
+				normal = normal,
+				weaponId = definition.id,
+				terrainCellsChanged = terrainCellsChanged,
+				terrainRevision = TerrainService.getRevision(),
+			})
+		end, function(problem: any): any
+			impactError = problem
+			return problem
 		end)
-		if terrainSucceeded then
-			terrainCellsChanged = terrainResult :: number
-		else
-			warn(string.format("[CritterClash] Terrain impact failed: %s", tostring(terrainResult)))
+		if not impactSucceeded then
+			warn(
+				string.format("[CritterClash] Projectile impact failed: %s", tostring(impactError))
+			)
 		end
-		remotes.combatEvent:FireAllClients("ProjectileImpacted", {
-			shotId = shotId,
-			position = position,
-			normal = normal,
-			weaponId = definition.id,
-			terrainCellsChanged = terrainCellsChanged,
-			terrainRevision = TerrainService.getRevision(),
-		})
-		MatchService.finishProjectile()
+		-- Lease-scoped finalization runs even if impact work fails.
+		MatchService.finishProjectile(lease)
 	end
 
 	remotes.combatEvent:FireAllClients("ProjectileLaunched", {
@@ -274,8 +310,8 @@ local function launchAuthoritativeShot(
 		windScale = definition.windScale,
 	})
 
-	local allowed, beginReason = beginProjectile()
-	if not allowed then
+	local allowed, beginReason, lease = beginProjectile()
+	if not allowed or not lease then
 		return false, beginReason or "shot_rejected"
 	end
 
@@ -300,7 +336,8 @@ local function launchAuthoritativeShot(
 			velocity,
 			acceleration,
 			shotId,
-			seed
+			seed,
+			lease
 		)
 	end, function(problem: any): any
 		launchError = problem
@@ -313,7 +350,7 @@ local function launchAuthoritativeShot(
 				tostring(launchError)
 			)
 		)
-		MatchService.finishProjectile()
+		MatchService.finishProjectile(lease)
 		return false, "server_simulation_error"
 	end
 	return true, nil
